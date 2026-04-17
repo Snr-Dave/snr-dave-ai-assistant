@@ -145,7 +145,11 @@ export function ChatWindow() {
             className="flex items-center justify-center w-10 h-10 rounded-lg bg-accent text-accent-foreground hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all focus:outline-none focus:ring-2 focus:ring-accent/50"
             aria-label="Send message"
           >
-            <Send className="w-4 h-4" />
+            {isStreaming || isSubmitting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Send className="w-4 h-4" />
+            )}
           </button>
         </div>
       </form>

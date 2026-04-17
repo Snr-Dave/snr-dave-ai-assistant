@@ -27,5 +27,5 @@ export interface Project {
   github?: string
 }
 
-// GitHub API endpoint for fetching repositories
-export const GITHUB_REPOS_URL = "https://api.github.com/users/Snr-Dave/repos?sort=updated&per_page=12"
+// Internal API route — token is applied server-side
+export const GITHUB_REPOS_URL = "/api/github/repos"
