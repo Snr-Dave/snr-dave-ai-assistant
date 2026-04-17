@@ -63,6 +63,7 @@ export function SystemStatus() {
   const [isRefreshing, setIsRefreshing] = useState(false)
 
   const checkStatus = async () => {
+    await Promise.resolve() // Defer state updates out of the synchronous effect body
     setIsRefreshing(true)
     setStatus({ api: "checking", ai: "checking", github: "checking" })
 
@@ -99,8 +100,9 @@ export function SystemStatus() {
   }
 
   useEffect(() => {
-    checkStatus()
-    const interval = setInterval(checkStatus, 60000)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void checkStatus()
+    const interval = setInterval(() => void checkStatus(), 60000)
     return () => clearInterval(interval)
   }, [])
 
@@ -141,7 +143,7 @@ export function SystemStatus() {
         <StatusItem
           icon={<Cpu className="w-4 h-4" />}
           label="AI Model"
-          value="Gemini 2.0 Flash"
+          value="Gemini 2.5 Flash"
           status={status.ai}
         />
         <StatusItem

@@ -1,7 +1,6 @@
-import { streamText, convertToModelMessages, tool } from "ai"
+import { streamText, convertToModelMessages, tool, jsonSchema } from "ai"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { Octokit } from "@octokit/rest"
-import { z } from "zod"
 
 const google = createGoogleGenerativeAI({
   apiKey: process.env.GOOGLE_API_KEY,
@@ -12,15 +11,23 @@ function getOctokit() {
   return new Octokit({ auth: process.env.GITHUB_TOKEN })
 }
 
+type ReadFileInput = { repo: string; path: string; branch?: string }
+type CreateBranchInput = { repo: string; branch: string; fromBranch?: string }
+type CommitFileInput = { repo: string; path: string; content: string; message: string; branch: string }
+
 const githubTools = {
-  readFile: tool({
+  readFile: tool<ReadFileInput, { content: string; sha: string; path: string } | { error: string }>({
     description: "Read the content of a file from a GitHub repository owned by Snr-Dave.",
-    parameters: z.object({
-      repo: z.string().describe("Repository name (without owner prefix), e.g. 'my-project'"),
-      path: z.string().describe("File path within the repository, e.g. 'src/index.ts'"),
-      branch: z.string().optional().describe("Branch name (defaults to the repo default branch)"),
+    inputSchema: jsonSchema<ReadFileInput>({
+      type: "object",
+      properties: {
+        repo: { type: "string", description: "Repository name (without owner prefix), e.g. 'my-project'" },
+        path: { type: "string", description: "File path within the repository, e.g. 'src/index.ts'" },
+        branch: { type: "string", description: "Branch name (defaults to the repo default branch)" },
+      },
+      required: ["repo", "path"],
     }),
-    execute: async ({ repo, path, branch }) => {
+    execute: async ({ repo, path, branch }: ReadFileInput) => {
       try {
         const octokit = getOctokit()
         const response = await octokit.repos.getContent({
@@ -35,20 +42,23 @@ const githubTools = {
         const content = Buffer.from(data.content, "base64").toString("utf-8")
         return { content, sha: data.sha, path: data.path }
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
-        return { error: `Failed to read file: ${message}` }
+        return { error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` }
       }
     },
   }),
 
-  createBranch: tool({
+  createBranch: tool<CreateBranchInput, { success: boolean; branch: string; basedOn: string } | { error: string }>({
     description: "Create a new branch in a GitHub repository owned by Snr-Dave.",
-    parameters: z.object({
-      repo: z.string().describe("Repository name (without owner prefix)"),
-      branch: z.string().describe("Name for the new branch"),
-      fromBranch: z.string().optional().describe("Source branch to create from (defaults to default branch)"),
+    inputSchema: jsonSchema<CreateBranchInput>({
+      type: "object",
+      properties: {
+        repo: { type: "string", description: "Repository name (without owner prefix)" },
+        branch: { type: "string", description: "Name for the new branch" },
+        fromBranch: { type: "string", description: "Source branch to create from (defaults to default branch)" },
+      },
+      required: ["repo", "branch"],
     }),
-    execute: async ({ repo, branch, fromBranch }) => {
+    execute: async ({ repo, branch, fromBranch }: CreateBranchInput) => {
       try {
         const octokit = getOctokit()
         const repoData = await octokit.repos.get({ owner: "Snr-Dave", repo })
@@ -66,22 +76,25 @@ const githubTools = {
         })
         return { success: true, branch, basedOn: baseBranch }
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
-        return { error: `Failed to create branch: ${message}` }
+        return { error: `Failed to create branch: ${err instanceof Error ? err.message : String(err)}` }
       }
     },
   }),
 
-  commitFile: tool({
+  commitFile: tool<CommitFileInput, { success: boolean; commitSha: string | undefined; url: string | undefined } | { error: string }>({
     description: "Create or update a file in a GitHub repository owned by Snr-Dave by committing a change.",
-    parameters: z.object({
-      repo: z.string().describe("Repository name (without owner prefix)"),
-      path: z.string().describe("File path to create or update"),
-      content: z.string().describe("New file content (plain text)"),
-      message: z.string().describe("Commit message"),
-      branch: z.string().describe("Branch to commit to"),
+    inputSchema: jsonSchema<CommitFileInput>({
+      type: "object",
+      properties: {
+        repo: { type: "string", description: "Repository name (without owner prefix)" },
+        path: { type: "string", description: "File path to create or update" },
+        content: { type: "string", description: "New file content (plain text)" },
+        message: { type: "string", description: "Commit message" },
+        branch: { type: "string", description: "Branch to commit to" },
+      },
+      required: ["repo", "path", "content", "message", "branch"],
     }),
-    execute: async ({ repo, path, content, message, branch }) => {
+    execute: async ({ repo, path, content, message, branch }: CommitFileInput) => {
       try {
         const octokit = getOctokit()
         let sha: string | undefined
@@ -113,8 +126,7 @@ const githubTools = {
           url: result.data.content?.html_url,
         }
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
-        return { error: `Failed to commit file: ${message}` }
+        return { error: `Failed to commit file: ${err instanceof Error ? err.message : String(err)}` }
       }
     },
   }),
@@ -127,14 +139,13 @@ export async function POST(req: Request) {
     console.log("[v0] Chat API called with", messages.length, "messages")
 
     const result = streamText({
-      model: google("gemini-2.0-flash"),
+      model: google("gemini-2.5-flash"),
       system: `You are Snr-Dave's personal AI assistant embedded in a Command Center dashboard.
 You have direct access to tools that can read files, create branches, and commit changes to any repository in the Snr-Dave GitHub account.
 When asked to make code changes, always: read the file first, explain what you will change, create a branch if needed, then commit.
 Be concise, technical when needed, and friendly. Use markdown formatting when helpful.`,
       messages: await convertToModelMessages(messages),
       tools: githubTools,
-      maxSteps: 10,
     })
 
     console.log("[v0] Stream created successfully")
@@ -152,7 +163,7 @@ export async function GET() {
   try {
     console.log("[v0] Chat API health check")
     return new Response(
-      JSON.stringify({ status: "ok", model: "gemini-2.0-flash" }),
+      JSON.stringify({ status: "ok", model: "gemini-2.5-flash" }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     )
   } catch (error) {
