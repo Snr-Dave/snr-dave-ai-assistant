@@ -49,7 +49,7 @@ export function ChatWindow() {
         </div>
         <div>
           <h2 className="text-sm font-semibold text-foreground">AI Assistant</h2>
-          <p className="text-xs text-muted-foreground">Powered by Gemini 2.5 Flash</p>
+          <p className="text-xs text-muted-foreground">Powered by Gemini 1.5 Flash</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <span className={`w-2 h-2 rounded-full ${isStreaming ? "bg-accent animate-pulse" : error ? "bg-red-500" : "bg-green-500"}`} />
