@@ -1,3 +1,22 @@
+// Type definitions for GitHub repository data
+// Data is now fetched dynamically from GitHub API
+
+export interface GitHubRepo {
+  id: number
+  name: string
+  full_name: string
+  description: string | null
+  html_url: string
+  homepage: string | null
+  language: string | null
+  stargazers_count: number
+  forks_count: number
+  updated_at: string
+  archived: boolean
+  fork: boolean
+}
+
+// Legacy type kept for potential future DB integration
 export interface Project {
   id: string
   name: string
@@ -8,44 +27,5 @@ export interface Project {
   github?: string
 }
 
-// Simple array structure prepared for future DB integration
-export const projects: Project[] = [
-  {
-    id: "1",
-    name: "Snr-Dave AI Assistant",
-    description: "Personal AI-powered dashboard with chat interface and GitHub integration",
-    status: "active",
-    technologies: ["Next.js", "AI SDK", "Tailwind CSS"],
-    github: "https://github.com/Snr-Dave/snr-dave-ai-assistant",
-  },
-  {
-    id: "2",
-    name: "Portfolio Website",
-    description: "Modern developer portfolio showcasing projects and skills",
-    status: "completed",
-    technologies: ["React", "TypeScript", "Framer Motion"],
-    url: "https://snr-dave.dev",
-  },
-  {
-    id: "3",
-    name: "Code Analyzer",
-    description: "AI-powered code review and analysis tool",
-    status: "active",
-    technologies: ["Python", "OpenAI", "FastAPI"],
-  },
-  {
-    id: "4",
-    name: "Task Automation Suite",
-    description: "Collection of scripts for automating development workflows",
-    status: "active",
-    technologies: ["Node.js", "Shell", "GitHub Actions"],
-  },
-]
-
-export function getActiveProjects(): Project[] {
-  return projects.filter((p) => p.status === "active")
-}
-
-export function getProjectById(id: string): Project | undefined {
-  return projects.find((p) => p.id === id)
-}
+// GitHub API endpoint for fetching repositories
+export const GITHUB_REPOS_URL = "https://api.github.com/users/Snr-Dave/repos?sort=updated&per_page=12"

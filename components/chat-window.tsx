@@ -1,9 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useChat } from "@ai-sdk/react"
 import { DefaultChatTransport } from "ai"
-import { Send, Bot, User, Loader2 } from "lucide-react"
+import { Send, Bot, User, Loader2, AlertCircle } from "lucide-react"
 
 function getMessageText(message: { parts?: Array<{ type: string; text?: string }> }): string {
   if (!message.parts || !Array.isArray(message.parts)) return ""
@@ -15,17 +15,27 @@ function getMessageText(message: { parts?: Array<{ type: string; text?: string }
 
 export function ChatWindow() {
   const [input, setInput] = useState("")
+  const messagesEndRef = useRef<HTMLDivElement>(null)
   
-  const { messages, sendMessage, status } = useChat({
+  const { messages, sendMessage, status, error } = useChat({
     transport: new DefaultChatTransport({ api: "/api/chat" }),
+    onError: (err) => {
+      console.error("[v0] Chat error:", err)
+    },
   })
 
   const isStreaming = status === "streaming"
   const isSubmitting = status === "submitted"
 
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [messages])
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!input.trim() || isStreaming || isSubmitting) return
+    console.log("[v0] Sending message:", input)
     sendMessage({ text: input })
     setInput("")
   }
@@ -39,11 +49,13 @@ export function ChatWindow() {
         </div>
         <div>
           <h2 className="text-sm font-semibold text-foreground">AI Assistant</h2>
-          <p className="text-xs text-muted-foreground">Powered by Gemini</p>
+          <p className="text-xs text-muted-foreground">Powered by Gemini 2.5 Flash</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <span className={`w-2 h-2 rounded-full ${isStreaming ? "bg-accent animate-pulse" : "bg-green-500"}`} />
-          <span className="text-xs text-muted-foreground">{isStreaming ? "Thinking..." : "Online"}</span>
+          <span className={`w-2 h-2 rounded-full ${isStreaming ? "bg-accent animate-pulse" : error ? "bg-red-500" : "bg-green-500"}`} />
+          <span className="text-xs text-muted-foreground">
+            {isStreaming ? "Thinking..." : error ? "Error" : "Online"}
+          </span>
         </div>
       </div>
 
@@ -93,6 +105,16 @@ export function ChatWindow() {
             )
           })
         )}
+        
+        {/* Error Display */}
+        {error && (
+          <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <p className="text-sm">Failed to send message. Please try again.</p>
+          </div>
+        )}
+        
+        {/* Streaming Indicator */}
         {isStreaming && (
           <div className="flex gap-3 animate-fade-in">
             <div className="flex-shrink-0 w-8 h-8 rounded-full bg-muted flex items-center justify-center">
@@ -103,6 +125,7 @@ export function ChatWindow() {
             </div>
           </div>
         )}
+        <div ref={messagesEndRef} />
       </div>
 
       {/* Input */}

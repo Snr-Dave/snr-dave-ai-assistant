@@ -1,7 +1,7 @@
 "use client"
 
-import { projects, type Project } from "@/lib/projects"
-import { Folder, ExternalLink, Circle } from "lucide-react"
+import useSWR from "swr"
+import { Folder, ExternalLink, Circle, Star, GitFork, Loader2, AlertCircle } from "lucide-react"
 
 function GitHubIcon({ className }: { className?: string }) {
   return (
@@ -11,22 +11,41 @@ function GitHubIcon({ className }: { className?: string }) {
   )
 }
 
-function StatusBadge({ status }: { status: Project["status"] }) {
-  const styles = {
-    active: "bg-green-500/10 text-green-400 border-green-500/20",
-    completed: "bg-accent/10 text-accent border-accent/20",
-    archived: "bg-muted text-muted-foreground border-border",
-  }
-
-  return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium rounded-full border ${styles[status]}`}>
-      <Circle className="w-1.5 h-1.5 fill-current" />
-      {status.charAt(0).toUpperCase() + status.slice(1)}
-    </span>
-  )
+interface GitHubRepo {
+  id: number
+  name: string
+  full_name: string
+  description: string | null
+  html_url: string
+  homepage: string | null
+  language: string | null
+  stargazers_count: number
+  forks_count: number
+  updated_at: string
+  archived: boolean
+  fork: boolean
 }
 
-function ProjectCard({ project }: { project: Project }) {
+const fetcher = (url: string) => fetch(url).then((res) => {
+  if (!res.ok) throw new Error("Failed to fetch")
+  return res.json()
+})
+
+function getLanguageColor(language: string | null): string {
+  const colors: Record<string, string> = {
+    TypeScript: "bg-blue-400",
+    JavaScript: "bg-yellow-400",
+    Python: "bg-green-400",
+    Rust: "bg-orange-400",
+    Go: "bg-cyan-400",
+    Java: "bg-red-400",
+    CSS: "bg-purple-400",
+    HTML: "bg-orange-500",
+  }
+  return colors[language || ""] || "bg-gray-400"
+}
+
+function ProjectCard({ repo }: { repo: GitHubRepo }) {
   return (
     <div className="group flex flex-col p-4 bg-card rounded-lg border border-border hover:border-accent/50 transition-all duration-200">
       <div className="flex items-start justify-between mb-3">
@@ -34,56 +53,83 @@ function ProjectCard({ project }: { project: Project }) {
           <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-accent/10 group-hover:bg-accent/20 transition-colors">
             <Folder className="w-5 h-5 text-accent" />
           </div>
-          <div>
-            <h3 className="text-sm font-semibold text-foreground group-hover:text-accent transition-colors">
-              {project.name}
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-foreground group-hover:text-accent transition-colors truncate">
+              {repo.name}
             </h3>
-            <StatusBadge status={project.status} />
+            <div className="flex items-center gap-2 mt-0.5">
+              {repo.archived && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-muted text-muted-foreground rounded">
+                  Archived
+                </span>
+              )}
+              {repo.fork && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-muted text-muted-foreground rounded">
+                  <GitFork className="w-3 h-3" /> Fork
+                </span>
+              )}
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-1">
-          {project.github && (
+          <a
+            href={repo.html_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-2 rounded-lg hover:bg-muted transition-colors"
+            aria-label={`View ${repo.name} on GitHub`}
+          >
+            <GitHubIcon className="w-4 h-4 text-muted-foreground hover:text-accent" />
+          </a>
+          {repo.homepage && (
             <a
-              href={project.github}
+              href={repo.homepage}
               target="_blank"
               rel="noopener noreferrer"
               className="p-2 rounded-lg hover:bg-muted transition-colors"
-              aria-label={`View ${project.name} on GitHub`}
-            >
-              <GitHubIcon className="w-4 h-4 text-muted-foreground hover:text-accent" />
-            </a>
-          )}
-          {project.url && (
-            <a
-              href={project.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="p-2 rounded-lg hover:bg-muted transition-colors"
-              aria-label={`Visit ${project.name}`}
+              aria-label={`Visit ${repo.name}`}
             >
               <ExternalLink className="w-4 h-4 text-muted-foreground hover:text-accent" />
             </a>
           )}
         </div>
       </div>
-      <p className="text-sm text-muted-foreground mb-4 line-clamp-2">
-        {project.description}
+      
+      <p className="text-sm text-muted-foreground mb-4 line-clamp-2 min-h-[2.5rem]">
+        {repo.description || "No description available"}
       </p>
-      <div className="mt-auto flex flex-wrap gap-1.5">
-        {project.technologies.map((tech) => (
-          <span
-            key={tech}
-            className="px-2 py-0.5 text-xs font-mono bg-muted text-muted-foreground rounded"
-          >
-            {tech}
+      
+      <div className="mt-auto flex items-center justify-between">
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          {repo.language && (
+            <span className="flex items-center gap-1.5">
+              <Circle className={`w-2 h-2 ${getLanguageColor(repo.language)}`} style={{ fill: "currentColor" }} />
+              {repo.language}
+            </span>
+          )}
+          <span className="flex items-center gap-1">
+            <Star className="w-3 h-3" />
+            {repo.stargazers_count}
           </span>
-        ))}
+          <span className="flex items-center gap-1">
+            <GitFork className="w-3 h-3" />
+            {repo.forks_count}
+          </span>
+        </div>
       </div>
     </div>
   )
 }
 
 export function ProjectsGrid() {
+  const { data: repos, error, isLoading } = useSWR<GitHubRepo[]>(
+    "https://api.github.com/users/Snr-Dave/repos?sort=updated&per_page=12",
+    fetcher,
+    { refreshInterval: 300000 } // Refresh every 5 minutes
+  )
+
+  const displayRepos = repos?.filter((repo) => !repo.fork) || []
+
   return (
     <div className="flex flex-col h-full bg-card rounded-lg border border-border overflow-hidden">
       {/* Header */}
@@ -94,18 +140,50 @@ export function ProjectsGrid() {
           </div>
           <div>
             <h2 className="text-sm font-semibold text-foreground">Projects</h2>
-            <p className="text-xs text-muted-foreground">{projects.length} total</p>
+            <p className="text-xs text-muted-foreground">
+              {isLoading ? "Loading..." : `${displayRepos.length} repositories`}
+            </p>
           </div>
         </div>
+        <a
+          href="https://github.com/Snr-Dave?tab=repositories"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-accent hover:underline"
+        >
+          View all
+        </a>
       </div>
 
       {/* Grid */}
       <div className="flex-1 overflow-y-auto p-4">
-        <div className="grid gap-4 sm:grid-cols-2">
-          {projects.map((project) => (
-            <ProjectCard key={project.id} project={project} />
-          ))}
-        </div>
+        {isLoading && (
+          <div className="flex items-center justify-center h-full">
+            <Loader2 className="w-8 h-8 text-accent animate-spin" />
+          </div>
+        )}
+        
+        {error && (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <AlertCircle className="w-8 h-8 text-red-400 mb-2" />
+            <p className="text-sm text-muted-foreground">Failed to load repositories</p>
+          </div>
+        )}
+        
+        {!isLoading && !error && displayRepos.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <Folder className="w-8 h-8 text-muted-foreground mb-2" />
+            <p className="text-sm text-muted-foreground">No repositories found</p>
+          </div>
+        )}
+        
+        {!isLoading && !error && displayRepos.length > 0 && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {displayRepos.map((repo) => (
+              <ProjectCard key={repo.id} repo={repo} />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
