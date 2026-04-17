@@ -1,19 +1,34 @@
 "use client"
 
-import { Activity, Cpu, HardDrive, Wifi } from "lucide-react"
+import { useEffect, useState } from "react"
+import { Activity, Cpu, HardDrive, Wifi, RefreshCw } from "lucide-react"
+
+type ConnectionStatus = "online" | "checking" | "offline"
+
+interface StatusState {
+  api: ConnectionStatus
+  ai: ConnectionStatus
+  github: ConnectionStatus
+}
 
 interface StatusItemProps {
   icon: React.ReactNode
   label: string
   value: string
-  status: "online" | "warning" | "offline"
+  status: ConnectionStatus
 }
 
 function StatusItem({ icon, label, value, status }: StatusItemProps) {
   const statusColors = {
-    online: "text-green-400",
-    warning: "text-yellow-400",
-    offline: "text-red-400",
+    online: "bg-green-400",
+    checking: "bg-yellow-400 animate-pulse",
+    offline: "bg-red-400",
+  }
+
+  const statusText = {
+    online: "Connected",
+    checking: "Checking...",
+    offline: "Offline",
   }
 
   return (
@@ -23,7 +38,9 @@ function StatusItem({ icon, label, value, status }: StatusItemProps) {
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="text-sm font-medium text-foreground truncate">{value}</p>
+        <p className="text-sm font-medium text-foreground truncate">
+          {status === "checking" ? statusText[status] : value}
+        </p>
       </div>
       <div className={`w-2 h-2 rounded-full ${statusColors[status]}`} />
     </div>
@@ -31,6 +48,60 @@ function StatusItem({ icon, label, value, status }: StatusItemProps) {
 }
 
 export function SystemStatus() {
+  const [status, setStatus] = useState<StatusState>({
+    api: "checking",
+    ai: "checking",
+    github: "checking",
+  })
+  const [lastChecked, setLastChecked] = useState<Date | null>(null)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+
+  const checkStatus = async () => {
+    setIsRefreshing(true)
+    setStatus({ api: "checking", ai: "checking", github: "checking" })
+
+    // Check API Gateway (our chat endpoint)
+    try {
+      const apiResponse = await fetch("/api/chat", { method: "GET" })
+      const apiData = await apiResponse.json()
+      setStatus((prev) => ({
+        ...prev,
+        api: apiResponse.ok ? "online" : "offline",
+        ai: apiData.model ? "online" : "offline",
+      }))
+      console.log("[v0] API status check:", apiData)
+    } catch (error) {
+      console.error("[v0] API status check failed:", error)
+      setStatus((prev) => ({ ...prev, api: "offline", ai: "offline" }))
+    }
+
+    // Check GitHub API
+    try {
+      const githubResponse = await fetch("https://api.github.com/users/Snr-Dave")
+      setStatus((prev) => ({
+        ...prev,
+        github: githubResponse.ok ? "online" : "offline",
+      }))
+      console.log("[v0] GitHub status check:", githubResponse.ok)
+    } catch (error) {
+      console.error("[v0] GitHub status check failed:", error)
+      setStatus((prev) => ({ ...prev, github: "offline" }))
+    }
+
+    setLastChecked(new Date())
+    setIsRefreshing(false)
+  }
+
+  useEffect(() => {
+    checkStatus()
+    // Re-check every 60 seconds
+    const interval = setInterval(checkStatus, 60000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const allOnline = Object.values(status).every((s) => s === "online")
+  const hasOffline = Object.values(status).some((s) => s === "offline")
+
   return (
     <div className="flex flex-col bg-card rounded-lg border border-border overflow-hidden">
       {/* Header */}
@@ -40,8 +111,18 @@ export function SystemStatus() {
         </div>
         <div>
           <h2 className="text-sm font-semibold text-foreground">System Status</h2>
-          <p className="text-xs text-muted-foreground">All systems operational</p>
+          <p className="text-xs text-muted-foreground">
+            {allOnline ? "All systems operational" : hasOffline ? "Some systems offline" : "Checking..."}
+          </p>
         </div>
+        <button
+          onClick={checkStatus}
+          disabled={isRefreshing}
+          className="ml-auto p-2 rounded-lg hover:bg-muted transition-colors disabled:opacity-50"
+          aria-label="Refresh status"
+        >
+          <RefreshCw className={`w-4 h-4 text-muted-foreground ${isRefreshing ? "animate-spin" : ""}`} />
+        </button>
       </div>
 
       {/* Status Grid */}
@@ -50,25 +131,25 @@ export function SystemStatus() {
           icon={<Wifi className="w-4 h-4" />}
           label="API Gateway"
           value="Connected"
-          status="online"
+          status={status.api}
         />
         <StatusItem
           icon={<Cpu className="w-4 h-4" />}
           label="AI Model"
           value="Gemini 2.5 Flash"
-          status="online"
+          status={status.ai}
         />
         <StatusItem
           icon={<HardDrive className="w-4 h-4" />}
-          label="Database"
-          value="Ready"
-          status="online"
+          label="GitHub API"
+          value="Connected"
+          status={status.github}
         />
         <StatusItem
           icon={<Activity className="w-4 h-4" />}
-          label="Uptime"
-          value="99.9%"
-          status="online"
+          label="Last Check"
+          value={lastChecked ? lastChecked.toLocaleTimeString() : "Never"}
+          status={allOnline ? "online" : hasOffline ? "offline" : "checking"}
         />
       </div>
     </div>
