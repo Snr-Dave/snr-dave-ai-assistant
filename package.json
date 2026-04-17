@@ -3,12 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 5000 -H 0.0.0.0",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 5000 -H 0.0.0.0",
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/google": "^3.0.64",
     "@ai-sdk/react": "^3.0.170",
     "ai": "^6.0.168",
     "lucide-react": "^1.8.0",
