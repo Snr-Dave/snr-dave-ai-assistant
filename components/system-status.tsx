@@ -141,7 +141,7 @@ export function SystemStatus() {
         <StatusItem
           icon={<Cpu className="w-4 h-4" />}
           label="AI Model"
-          value="Gemini 1.5 Flash"
+          value="Gemini 2.0 Flash"
           status={status.ai}
         />
         <StatusItem
