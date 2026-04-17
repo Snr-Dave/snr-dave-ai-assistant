@@ -12,7 +12,7 @@ export async function POST(req: Request) {
     console.log("[v0] Chat API called with", messages.length, "messages")
 
     const result = streamText({
-      model: google("gemini-2.5-flash"),
+      model: google("gemini-1.5-flash"),
       system: `You are Snr-Dave's personal AI assistant, embedded in a Command Center dashboard. 
 You help with coding questions, project management, and general tasks.
 Be concise, technical when needed, and friendly. Use markdown formatting when helpful.
@@ -35,7 +35,7 @@ export async function GET() {
   try {
     console.log("[v0] Chat API health check")
     return new Response(
-      JSON.stringify({ status: "ok", model: "gemini-2.5-flash" }),
+      JSON.stringify({ status: "ok", model: "gemini-1.5-flash" }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     )
   } catch (error) {
