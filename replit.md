@@ -31,15 +31,24 @@ Personal AI-powered dashboard with real-time chat, GitHub activity feed, and pro
 | `GOOGLE_API_KEY` | Google AI Studio key for Gemini 2.5 Flash |
 | `GITHUB_TOKEN` | GitHub PAT for authenticated API calls and AI agent tools |
 
-## AI GitHub Agent Tools
+## AI GitHub Agent Tools (DevOps & Security Specialist)
 
-The chat assistant can interact with GitHub repositories via three tools:
+The assistant has 9 tools across three categories. All run server-side via Octokit + `GITHUB_TOKEN`. Secret encryption uses `libsodium-wrappers` (`crypto_box_seal`).
 
-- **`readFile`** — Read any file from any `Snr-Dave` repo
-- **`createBranch`** — Create a new branch from any base branch
-- **`commitFile`** — Create or update a file and commit it to a branch
+**File & Branch**
+- `readFile` — Read any file from any `Snr-Dave` repo at any ref
+- `createBranch` — Create a new branch from a specified base
+- `commitFile` — Create or update a file and commit it to a branch
 
-Tools use `GITHUB_TOKEN` server-side via Octokit. Up to 10 chained tool steps per request.
+**Settings**
+- `getRepoSettings` — Fetch visibility, topics, and default branch
+- `setRepoSecret` — Create/overwrite a GitHub Actions secret (write-only; cannot read values back)
+- `manageActions` — Create or update workflow YAML files in `.github/workflows/`
+
+**PR & Merge**
+- `createPullRequest` — Open a PR between two branches
+- `mergePullRequest` — Merge an open PR by number (merge/squash/rebase)
+- `mergeBranches` — Direct branch sync via `repos.merge` without a PR
 
 ## AI SDK v6 Notes
 
