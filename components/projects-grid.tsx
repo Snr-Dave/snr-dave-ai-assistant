@@ -123,7 +123,7 @@ function ProjectCard({ repo }: { repo: GitHubRepo }) {
 
 export function ProjectsGrid() {
   const { data: repos, error, isLoading } = useSWR<GitHubRepo[]>(
-    "https://api.github.com/users/Snr-Dave/repos?sort=updated&per_page=12",
+    "/api/github/repos",
     fetcher,
     { refreshInterval: 300000 } // Refresh every 5 minutes
   )

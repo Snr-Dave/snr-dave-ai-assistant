@@ -77,7 +77,7 @@ function formatTimeAgo(dateString: string): string {
 
 export function GitHubFeed() {
   const { data, error, isLoading } = useSWR<GitHubEvent[]>(
-    "https://api.github.com/users/Snr-Dave/events/public?per_page=10",
+    "/api/github/events",
     fetcher,
     { refreshInterval: 60000 } // Refresh every minute
   )

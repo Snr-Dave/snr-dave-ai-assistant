@@ -18,6 +18,12 @@ interface StatusItemProps {
   status: ConnectionStatus
 }
 
+function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 8000): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer))
+}
+
 function StatusItem({ icon, label, value, status }: StatusItemProps) {
   const statusColors = {
     online: "bg-green-400",
@@ -57,12 +63,13 @@ export function SystemStatus() {
   const [isRefreshing, setIsRefreshing] = useState(false)
 
   const checkStatus = async () => {
+    await Promise.resolve() // Defer state updates out of the synchronous effect body
     setIsRefreshing(true)
     setStatus({ api: "checking", ai: "checking", github: "checking" })
 
-    // Check API Gateway (our chat endpoint)
+    // Check API Gateway + AI model (8s timeout)
     try {
-      const apiResponse = await fetch("/api/chat", { method: "GET" })
+      const apiResponse = await fetchWithTimeout("/api/chat", { method: "GET" })
       const apiData = await apiResponse.json()
       setStatus((prev) => ({
         ...prev,
@@ -75,9 +82,9 @@ export function SystemStatus() {
       setStatus((prev) => ({ ...prev, api: "offline", ai: "offline" }))
     }
 
-    // Check GitHub API
+    // Check GitHub via our authenticated server-side proxy (avoids rate limits)
     try {
-      const githubResponse = await fetch("https://api.github.com/users/Snr-Dave")
+      const githubResponse = await fetchWithTimeout("/api/github/events")
       setStatus((prev) => ({
         ...prev,
         github: githubResponse.ok ? "online" : "offline",
@@ -93,9 +100,9 @@ export function SystemStatus() {
   }
 
   useEffect(() => {
-    checkStatus()
-    // Re-check every 60 seconds
-    const interval = setInterval(checkStatus, 60000)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void checkStatus()
+    const interval = setInterval(() => void checkStatus(), 60000)
     return () => clearInterval(interval)
   }, [])
 

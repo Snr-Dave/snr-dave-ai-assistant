@@ -1,163 +1,244 @@
-# Snr-Dave AI Assistant
+<div align="center">
 
-A Command Center dashboard featuring real-time AI chat, GitHub activity monitoring, and dynamic project portfolio. Built with a high-contrast Deep Charcoal and Electric Cyan aesthetic.
+# ⚡ Snr-Dave AI Assistant
 
-## Tech Stack
+### Personal Command Center — AI Chat · GitHub Intelligence · System Monitoring
 
-- **Framework:** Next.js 15 (App Router)
-- **AI Integration:** Vercel AI SDK 6 with Gemini 2.5 Flash
-- **Styling:** Tailwind CSS 4
-- **Data Fetching:** SWR for real-time updates
-- **Icons:** Lucide React
+<p>
+  <a href="https://nextjs.org"><img src="public/screenshots/badges/nextjs.png" alt="Next.js" /></a>
+  <a href="https://typescriptlang.org"><img src="public/screenshots/badges/typescript.png" alt="TypeScript" /></a>
+  <a href="https://tailwindcss.com"><img src="public/screenshots/badges/tailwind.png" alt="Tailwind CSS" /></a>
+  <a href="https://ai.google.dev"><img src="public/screenshots/badges/gemini.png" alt="Gemini" /></a>
+  <a href="https://replit.com"><img src="public/screenshots/badges/replit.png" alt="Replit" /></a>
+</p>
 
-## Features
+---
 
-### Real-time AI Chat
-- Conversational AI assistant powered by Google Gemini 2.5 Flash
-- Streaming responses with real-time typing indicators
-- Error handling and connection status display
-- Auto-scrolling message history
+</div>
 
-### GitHub Activity Feed
-- Live feed of the last 10 GitHub events for Snr-Dave
-- Auto-refreshes every 60 seconds
-- Displays push events, pull requests, issues, stars, and more
-- Relative timestamps and event-specific icons
+## 🖥️ Dashboard Preview
 
-### Dynamic Project Portfolio
-- Fetches repositories directly from GitHub API
-- Shows stars, forks, and primary language
-- Filters out forked repositories
-- Links to repository and live demo (if available)
+![Snr-Dave AI Assistant Dashboard](public/screenshots/dashboard-preview.jpg)
 
-### System Status Monitor
-- Real-time health checks for API Gateway and AI Model
-- GitHub API connectivity status
-- Manual refresh button
-- Auto-checks every 60 seconds
+> **Deep Charcoal** background · **Electric Cyan** accents · Live data across every panel
 
-## Environment Variables
+---
 
-Create a `.env.local` file in the root directory or configure these in your Vercel project settings:
+## ✨ Features
 
-```bash
-# No API keys required for basic functionality!
-# The AI SDK uses the Vercel AI Gateway which provides 
-# access to Gemini through Vercel's infrastructure.
+### 🤖 AI Chat Assistant
+- Streaming conversations powered by **Google Gemini 2.5 Flash**
+- Real-time typing indicator and send-button spinner during generation
+- Full message history with auto-scroll
+- Model status badge shown in the chat header
+- **GitHub Agent Tools** — the AI can read files, create branches, and commit code directly to your repos
 
-# Optional: For custom AI provider configuration
-# AI_GATEWAY_API_KEY=your_key_here
-```
+### 🐙 GitHub Activity Feed
+- Live feed of the latest events from `@Snr-Dave` via a server-side proxy
+- Push events, PR merges, branch creation, issues, stars, and more
+- Event-specific icons and relative timestamps
+- Auto-refreshes every **60 seconds** via SWR
 
-> **Note:** When deployed on Vercel, the AI Gateway provides zero-config access to Gemini. No API keys are required.
+### 📁 Projects Grid
+- Pulls repositories live from the GitHub API (server-side with auth)
+- Shows language badge, star count, and fork count per repo
+- Filters out forks — only original work shown
+- External link to each repository
 
-## Getting Started
+### 📡 System Status Bar
+- Health checks for **API Gateway**, **AI Model**, and **GitHub API**
+- Displays last-check timestamp
+- Auto-checks every 60 seconds, manual refresh button available
+- All-green · partial-warning · offline states with distinct colour coding
 
-### Prerequisites
+---
 
-- Node.js 18.x or later
-- npm, yarn, or pnpm
+## 🛠️ Tech Stack
 
-### Installation
+| Layer | Technology |
+|-------|-----------|
+| **Framework** | Next.js 16.2.4 — App Router + Turbopack |
+| **Language** | TypeScript 5.x |
+| **AI Runtime** | Vercel AI SDK v6 (`ai@6`) + `@ai-sdk/google` |
+| **AI Model** | Google Gemini 2.5 Flash |
+| **GitHub Client** | Octokit REST (`@octokit/rest`) |
+| **Styling** | Tailwind CSS v4 — utility-first |
+| **Data Fetching** | SWR — stale-while-revalidate |
+| **Icons** | Lucide React |
+| **Fonts** | Geist Sans · Geist Mono |
+| **Platform** | Replit (dev & prod) |
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/Snr-Dave/snr-dave-ai-assistant.git
-   cd snr-dave-ai-assistant
-   ```
+---
 
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
+## 🤖 GitHub Agent Tools
 
-3. Run the development server:
-   ```bash
-   npm run dev
-   ```
+The AI assistant has direct access to your GitHub repositories via three built-in tools. These run **server-side** using `GITHUB_TOKEN` — the model decides when to call them based on your messages.
 
-4. Open [http://localhost:3000](http://localhost:3000) in your browser.
+| Tool | What it does |
+|------|-------------|
+| `readFile` | Read any file from any `Snr-Dave` repo at any ref |
+| `createBranch` | Create a new branch from a specified base |
+| `commitFile` | Create or update a file and commit it to a branch |
 
-## Project Structure
+> Built with **Vercel AI SDK v6** `tool()` + `jsonSchema<T>()` — up to 10 chained tool steps per conversation turn.
+
+---
+
+## 📂 Project Structure
 
 ```
 snr-dave-ai-assistant/
 ├── app/
 │   ├── api/
-│   │   └── chat/
-│   │       └── route.ts      # AI chat API endpoint
-│   ├── globals.css           # Tailwind config & design tokens
-│   ├── layout.tsx            # Root layout with fonts
-│   └── page.tsx              # Main dashboard page
+│   │   ├── chat/
+│   │   │   └── route.ts          # AI chat — Gemini 2.5 Flash + GitHub tools
+│   │   └── github/
+│   │       ├── events/
+│   │       │   └── route.ts      # Server-side GitHub events proxy
+│   │       └── repos/
+│   │           └── route.ts      # Server-side GitHub repos proxy
+│   ├── globals.css               # Tailwind config & design tokens
+│   ├── layout.tsx                # Root layout with Geist fonts
+│   └── page.tsx                  # Main dashboard page
 ├── components/
-│   ├── chat-window.tsx       # AI chat interface
-│   ├── dashboard-header.tsx  # Navigation header
-│   ├── github-feed.tsx       # GitHub activity feed
-│   ├── projects-grid.tsx     # Dynamic project cards
-│   └── system-status.tsx     # Health monitoring
-└── lib/
-    └── projects.ts           # Project type definitions
+│   ├── chat-window.tsx           # Streaming AI chat interface
+│   ├── dashboard-header.tsx      # Top navigation bar
+│   ├── github-feed.tsx           # Live GitHub activity feed
+│   ├── projects-grid.tsx         # Repository cards grid
+│   └── system-status.tsx         # Health monitoring bar
+├── lib/
+│   └── projects.ts               # Project type definitions
+├── attached_assets/
+│   └── screenshots/
+│       └── dashboard-preview.jpg # Dashboard preview image
+├── next.config.ts                # allowedDevOrigins for Replit HMR
+└── replit.md                     # Replit environment reference
 ```
 
-## Design System
+---
 
-### Colors
+## 🔐 Environment Variables
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| Background | `#0f0f0f` | Deep Charcoal - primary background |
-| Foreground | `#f5f5f5` | Primary text |
-| Accent | `#00d9ff` | Electric Cyan - interactive elements |
-| Card | `#171717` | Card backgrounds |
-| Muted | `#262626` | Secondary backgrounds |
+Configure these as **Replit Secrets** (or `.env.local` for local dev):
 
-### Typography
+| Secret | Required | Purpose |
+|--------|----------|---------|
+| `GOOGLE_API_KEY` | ✅ Yes | Google AI Studio key — powers Gemini 2.5 Flash |
+| `GITHUB_TOKEN` | ✅ Yes | GitHub PAT — authenticated API calls + AI agent tools |
 
-- **Sans:** Geist Sans - UI elements and body text
-- **Mono:** Geist Mono - Code and technical labels
+> Both secrets are used **server-side only** — never exposed to the browser.
 
-## Deployment
+---
 
-### Deploy to Vercel
+## 🚀 Getting Started
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FSnr-Dave%2Fsnr-dave-ai-assistant)
+### Prerequisites
+- Node.js 18.x or later
+- A [Google AI Studio](https://aistudio.google.com) API key
+- A GitHub Personal Access Token with `repo` scope
 
-1. Click the button above or import from GitHub
-2. Vercel automatically detects Next.js and configures build settings
-3. No environment variables needed for basic functionality
-4. Your AI Assistant will be live in seconds
+### Run locally
 
-## API Endpoints
+```bash
+# 1. Clone
+git clone https://github.com/Snr-Dave/snr-dave-ai-assistant.git
+cd snr-dave-ai-assistant
 
-### POST /api/chat
-Send messages to the AI assistant.
+# 2. Install
+npm install
 
-**Request:**
+# 3. Set secrets
+cp .env.example .env.local
+# → add GOOGLE_API_KEY and GITHUB_TOKEN
+
+# 4. Start
+npm run dev
+# → http://localhost:5000
+```
+
+---
+
+## 🌐 API Reference
+
+### `POST /api/chat`
+Stream a conversation with the AI assistant.
+
 ```json
+// Request body
 {
   "messages": [
-    { "role": "user", "parts": [{ "type": "text", "text": "Hello!" }] }
+    { "role": "user", "content": "What files are in my main repo?" }
   ]
 }
 ```
+**Response:** Server-Sent Events stream (AI SDK data stream protocol).
 
-**Response:** Server-sent events stream with AI responses.
+---
 
-### GET /api/chat
-Health check endpoint for system status monitoring.
+### `GET /api/chat`
+Health check — confirms the model is reachable.
 
-**Response:**
 ```json
-{
-  "status": "ok",
-  "model": "google/gemini-2.5-flash"
-}
+{ "status": "ok", "model": "gemini-2.5-flash" }
 ```
 
-## License
+---
 
-MIT License - feel free to use this project as a starting point for your own AI assistant dashboard.
+### `GET /api/github/events`
+Returns the latest 10 GitHub events for `@Snr-Dave`.
+Authenticated server-side with `GITHUB_TOKEN` to avoid rate limits.
 
-## Author
+---
 
-**Snr-Dave** - [GitHub](https://github.com/Snr-Dave)
+### `GET /api/github/repos`
+Returns original (non-forked) repositories for `@Snr-Dave`.
+Authenticated server-side with `GITHUB_TOKEN`.
+
+---
+
+## 🎨 Design System
+
+### Colour Palette
+
+| Token | Hex | Role |
+|-------|-----|------|
+| Background | `#0f0f0f` | Deep Charcoal — primary canvas |
+| Card | `#171717` | Panel / card surfaces |
+| Muted | `#262626` | Secondary backgrounds, dividers |
+| Accent | `#00d9ff` | Electric Cyan — interactive & active states |
+| Foreground | `#f5f5f5` | Primary text |
+| Muted Text | `#a3a3a3` | Secondary / metadata text |
+
+### Typography
+- **Geist Sans** — UI text, headings, body
+- **Geist Mono** — code snippets, timestamps, technical labels
+
+---
+
+## 🔄 Migration History
+
+| Version | Change |
+|---------|--------|
+| v1.0 | Initial build — Vercel AI Gateway + static project list |
+| v1.1 | Migrated from Vercel to **Replit** — port 5000, `allowedDevOrigins` |
+| v1.2 | Switched AI backend to `@ai-sdk/google` with `GOOGLE_API_KEY` |
+| v1.3 | Added server-side GitHub proxy routes with `GITHUB_TOKEN` via Octokit |
+| v1.4 | Wired live GitHub data into feed, projects grid, and system status |
+| v1.5 | Added **GitHub Agent Tools** (readFile, createBranch, commitFile) to chat |
+| v1.6 | Fixed TypeScript: `parameters` → `inputSchema` (AI SDK v6 rename) |
+| v1.6 | Fixed ESLint: `react-hooks/set-state-in-effect` in system status |
+| v1.6 | Upgraded model label to `gemini-2.5-flash` across all UI and API |
+
+---
+
+## 📄 License
+
+MIT — use freely as a starting point for your own AI command center.
+
+---
+
+<div align="center">
+
+Built by **[Snr-Dave](https://github.com/Snr-Dave)** · Powered by Gemini · Hosted on Replit
+
+</div>
