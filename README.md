@@ -5,11 +5,11 @@
 ### Personal Command Center — AI Chat · GitHub Intelligence · System Monitoring
 
 <p>
-  <a href="https://nextjs.org"><img src="https://img.shields.io/badge/Next.js-16.2-black?style=for-the-badge&logo=next.js" alt="Next.js" /></a>
-  <a href="https://typescriptlang.org"><img src="https://img.shields.io/badge/TypeScript-5.x-3178c6?style=for-the-badge&logo=typescript" alt="TypeScript" /></a>
-  <a href="https://tailwindcss.com"><img src="https://img.shields.io/badge/Tailwind-v4-06b6d4?style=for-the-badge&logo=tailwind-css" alt="Tailwind CSS" /></a>
-  <a href="https://ai.google.dev"><img src="https://img.shields.io/badge/Gemini-2.5_Flash-4285f4?style=for-the-badge&logo=google" alt="Gemini" /></a>
-  <a href="https://replit.com"><img src="https://img.shields.io/badge/Hosted_on-Replit-f26207?style=for-the-badge&logo=replit" alt="Replit" /></a>
+  <a href="https://nextjs.org"><img src="public/screenshots/badges/nextjs.png" alt="Next.js" /></a>
+  <a href="https://typescriptlang.org"><img src="public/screenshots/badges/typescript.png" alt="TypeScript" /></a>
+  <a href="https://tailwindcss.com"><img src="public/screenshots/badges/tailwind.png" alt="Tailwind CSS" /></a>
+  <a href="https://ai.google.dev"><img src="public/screenshots/badges/gemini.png" alt="Gemini" /></a>
+  <a href="https://replit.com"><img src="public/screenshots/badges/replit.png" alt="Replit" /></a>
 </p>
 
 ---
