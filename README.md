@@ -4,11 +4,13 @@
 
 ### Personal Command Center — AI Chat · GitHub Intelligence · System Monitoring
 
-[![Next.js](https://img.shields.io/badge/Next.js-16.2-black?style=for-the-badge&logo=next.js)](https://nextjs.org)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?style=for-the-badge&logo=typescript)](https://typescriptlang.org)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind-v4-06b6d4?style=for-the-badge&logo=tailwind-css)](https://tailwindcss.com)
-[![Gemini](https://img.shields.io/badge/Gemini-2.5_Flash-4285f4?style=for-the-badge&logo=google)](https://ai.google.dev)
-[![Replit](https://img.shields.io/badge/Hosted_on-Replit-f26207?style=for-the-badge&logo=replit)](https://replit.com)
+<p>
+  <a href="https://nextjs.org"><img src="https://img.shields.io/badge/Next.js-16.2-black?style=for-the-badge&logo=next.js" alt="Next.js" /></a>
+  <a href="https://typescriptlang.org"><img src="https://img.shields.io/badge/TypeScript-5.x-3178c6?style=for-the-badge&logo=typescript" alt="TypeScript" /></a>
+  <a href="https://tailwindcss.com"><img src="https://img.shields.io/badge/Tailwind-v4-06b6d4?style=for-the-badge&logo=tailwind-css" alt="Tailwind CSS" /></a>
+  <a href="https://ai.google.dev"><img src="https://img.shields.io/badge/Gemini-2.5_Flash-4285f4?style=for-the-badge&logo=google" alt="Gemini" /></a>
+  <a href="https://replit.com"><img src="https://img.shields.io/badge/Hosted_on-Replit-f26207?style=for-the-badge&logo=replit" alt="Replit" /></a>
+</p>
 
 ---
 
@@ -16,7 +18,7 @@
 
 ## 🖥️ Dashboard Preview
 
-![Snr-Dave AI Assistant Dashboard](attached_assets/screenshots/dashboard-preview.jpg)
+![Snr-Dave AI Assistant Dashboard](public/screenshots/dashboard-preview.jpg)
 
 > **Deep Charcoal** background · **Electric Cyan** accents · Live data across every panel
 
