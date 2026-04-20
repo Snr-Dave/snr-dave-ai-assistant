@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # 1. Keep GitHub Actions secure
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "security"
+      - "ci"
+
+  # 2. Keep npm packages (Next.js, Vercel AI SDK) updated
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "daily" # Changed to daily for faster security patches
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
