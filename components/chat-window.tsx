@@ -132,10 +132,11 @@ export function ChatWindow() {
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && e.shiftKey) {
       e.preventDefault()
       handleSubmit()
     }
+    // Plain Enter always inserts a newline (default textarea behaviour — no override needed)
   }
 
   const handleCopy = async (text: string, id: string) => {
@@ -290,23 +291,25 @@ export function ChatWindow() {
                       {text}
                     </div>
 
-                    {/* Hover action icons */}
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <ActionBtn
-                        title={isCopied ? "Copied!" : "Copy message"}
-                        onClick={() => handleCopy(text, message.id)}
-                      >
-                        {isCopied
-                          ? <Check   className="w-3.5 h-3.5 text-green-400" />
-                          : <Copy    className="w-3.5 h-3.5" />
-                        }
-                      </ActionBtn>
+                    {/* Action icons — copy fades in on hover; edit always visible on user messages */}
+                    <div className="flex items-center gap-0.5">
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                        <ActionBtn
+                          title={isCopied ? "Copied!" : "Copy message"}
+                          onClick={() => handleCopy(text, message.id)}
+                        >
+                          {isCopied
+                            ? <Check className="w-3.5 h-3.5 text-green-400" />
+                            : <Copy  className="w-3.5 h-3.5" />
+                          }
+                        </ActionBtn>
+                      </div>
                       {isUser && !isActive && (
                         <ActionBtn
-                          title="Edit message"
+                          title="Edit this message"
                           onClick={() => startEdit(message.id, text)}
                         >
-                          <Pencil className="w-3.5 h-3.5" />
+                          <Pencil className="w-3.5 h-3.5 text-accent/70 hover:text-accent" />
                         </ActionBtn>
                       )}
                     </div>
@@ -386,7 +389,7 @@ export function ChatWindow() {
             placeholder={
               isActive
                 ? "Waiting for response…"
-                : "Message… (Enter to send · Shift+Enter for new line)"
+                : "Message… (Shift+Enter to send · Enter for new line)"
             }
             disabled={isActive}
             className="flex-1 min-w-0 px-4 py-2.5 bg-background border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-all disabled:opacity-60 resize-none overflow-y-auto leading-relaxed"
