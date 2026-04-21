@@ -22,23 +22,34 @@ function getMessageText(parts: AnyPart[] | undefined): string {
     .join("")
 }
 
-// Matches both "tool-invocation" (legacy shape) and "dynamic-tool" (v6 shape)
+// AI SDK v6 tool part shapes:
+//   Static tools  → part.type = "tool-{toolName}", active states: "input-streaming" | "input-available"
+//   Dynamic tools → part.type = "dynamic-tool",    active states: "input-streaming" | "input-available"
+const ACTIVE_TOOL_STATES = new Set(["input-streaming", "input-available"])
+
 function getActiveToolName(parts: AnyPart[] | undefined): string | undefined {
   if (!parts) return undefined
   for (const p of parts) {
-    if (p.type === "tool-invocation") {
-      const inv = p.toolInvocation as { toolName?: string; state?: string } | undefined
-      if (inv?.state === "call" || inv?.state === "partial-call") return inv.toolName
+    const state = p.state as string | undefined
+    if (!state || !ACTIVE_TOOL_STATES.has(state)) continue
+    // Static tool: type is "tool-<toolName>"
+    if (typeof p.type === "string" && p.type.startsWith("tool-") && p.type !== "tool-approval-request" && p.type !== "tool-approval-response") {
+      return p.type.split("-").slice(1).join("-")
     }
-    if (p.type === "dynamic-tool") {
-      if (p.state === "call" || p.state === "partial-call") return p.toolName as string
+    // Dynamic tool
+    if (p.type === "dynamic-tool" && typeof p.toolName === "string") {
+      return p.toolName as string
     }
   }
   return undefined
 }
 
 function formatToolName(name: string): string {
-  return name.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase()).trim()
+  // "readFile" → "Read File",  "createBranch" → "Create Branch"
+  return name
+    .replace(/([A-Z])/g, " $1")
+    .replace(/^(.)/, (s) => s.toUpperCase())
+    .trim()
 }
 
 function autoResize(el: HTMLTextAreaElement | null, maxPx = 200) {
