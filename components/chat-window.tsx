@@ -132,11 +132,11 @@ export function ChatWindow() {
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       handleSubmit()
     }
-    // Plain Enter always inserts a newline (default textarea behaviour — no override needed)
+    // Shift+Enter inserts a newline (default textarea behaviour — no override needed)
   }
 
   const handleCopy = async (text: string, id: string) => {
@@ -343,7 +343,7 @@ export function ChatWindow() {
               {activeToolName ? (
                 <span className="flex items-center gap-1.5 text-xs min-w-0">
                   <Wrench className="w-3 h-3 flex-shrink-0 text-accent" />
-                  <span className="text-muted-foreground flex-shrink-0">Action:</span>
+                  <span className="text-muted-foreground flex-shrink-0">Assistant Action:</span>
                   <span className="text-accent font-medium truncate">
                     {formatToolName(activeToolName)}…
                   </span>
@@ -389,7 +389,7 @@ export function ChatWindow() {
             placeholder={
               isActive
                 ? "Waiting for response…"
-                : "Message… (Shift+Enter to send · Enter for new line)"
+                : "Message… (Enter to send · Shift+Enter for new line)"
             }
             disabled={isActive}
             className="flex-1 min-w-0 px-4 py-2.5 bg-background border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-all disabled:opacity-60 resize-none overflow-y-auto leading-relaxed"
