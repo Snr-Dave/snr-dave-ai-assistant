@@ -11,7 +11,7 @@ export const XTermCore = forwardRef<TerminalHandle>(function XTermCore(_, ref) {
   const fitRef    = useRef<import("@xterm/addon-fit").FitAddon | null>(null)
   const socketRef = useRef<import("socket.io-client").Socket | null>(null)
 
-  // ── Exposed handles (Clear / Copy) ────────────────────────────────────────
+  // ── Exposed handles (Clear / Copy / FontSize) ────────────────────────────
   useImperativeHandle(ref, () => ({
     clear() {
       // Clear xterm's visual buffer and ask bash to redraw the prompt (Ctrl+L)
@@ -23,6 +23,14 @@ export const XTermCore = forwardRef<TerminalHandle>(function XTermCore(_, ref) {
       if (sel) {
         try { await navigator.clipboard.writeText(sel) } catch { /* denied */ }
       }
+    },
+    setFontSize(n: number) {
+      if (!termRef.current) return
+      termRef.current.options.fontSize = n
+      // Allow one microtask for xterm to apply the change, then refit
+      requestAnimationFrame(() => {
+        try { fitRef.current?.fit() } catch { /* ignore */ }
+      })
     },
   }))
 
