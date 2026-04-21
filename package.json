@@ -13,6 +13,8 @@
     "@ai-sdk/react": "^3.0.170",
     "@octokit/rest": "^22.0.1",
     "@types/libsodium-wrappers": "^0.7.14",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "ai": "^6.0.168",
     "libsodium-wrappers": "^0.8.4",
     "lucide-react": "^1.8.0",
