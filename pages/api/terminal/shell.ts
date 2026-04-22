@@ -4,6 +4,7 @@ import { spawn } from "child_process"
 import type { Socket as NetSocket } from "net"
 import type { Server as HTTPServer } from "http"
 import type { Server as IOServer } from "socket.io"
+import { registerTerminalIo } from "@/lib/terminal-bus"
 
 // ── Type augmentation ────────────────────────────────────────────────────────
 
@@ -34,6 +35,7 @@ export default function handler(_req: NextApiRequest, res: ResponseWithSocket) {
     })
 
     res.socket.server.io = io
+    registerTerminalIo(io)
 
     io.on("connection", (socket) => {
       console.log("[terminal] Client connected:", socket.id)

@@ -62,24 +62,32 @@ The user has a live, interactive bash shell available in the dashboard's
 Settings → System Console panel. It runs in the project workspace
 (\`/home/runner/workspace\`) and shares the same filesystem as the app.
 
-When the user asks you to run a shell command, **do not narrate the command
-in plain prose** — emit it inside a fenced code block tagged \`bash-exec\`.
-The dashboard recognises this language tag and offers a one-click "Run in
-Console" action. Plain \`bash\` blocks are treated as read-only examples.
+**You can execute commands directly via the \`executeBash\` tool.** Output
+streams live to the user's System Console (so they watch the work happen) and
+the captured stdout/stderr come back as the tool result so you can verify
+what happened and decide next steps.
+
+When you intend to show the command before running it (for explanation or
+confirmation), wrap it in a fenced code block tagged \`bash-exec\`. Plain
+\`bash\` blocks are treated as read-only examples.
 
 Rules:
-- One logical command per \`bash-exec\` block (chain with \`&&\` or \`;\` if needed).
-- Never include destructive commands (\`rm -rf\`, \`git reset --hard\`,
-  \`DROP TABLE\`, force-pushes, etc.) without first explaining the impact and
-  asking the user to confirm. Wait for confirmation before emitting them.
-- Prefer non-interactive flags (\`--yes\`, \`--non-interactive\`) so the
-  command can run without user input in the console.
-- For long-running commands (servers, watchers), warn the user that the
-  console will be occupied until they stop the process.
+- One logical command per \`executeBash\` call (chain with \`&&\` or \`;\` if needed).
+- For destructive commands (\`rm -rf\`, \`git reset --hard\`, \`git push --force\`,
+  \`DROP TABLE\`, etc.), first explain the impact in prose, ask the user to
+  confirm, and only call \`executeBash\` after they agree.
+- Prefer non-interactive flags (\`--yes\`, \`--non-interactive\`, \`-y\`) — there
+  is no human at the prompt during execution.
+- For long-running commands (dev servers, watchers), warn the user and prefer
+  short-lived alternatives (\`npm run build\` rather than \`npm run dev\`).
+- After execution, check \`exitCode\` and \`stderr\` and report the outcome
+  honestly — do not claim success on a non-zero exit.
 
-Example:
+Example narration:
 
 \`\`\`bash-exec
 git status --short
 \`\`\`
+
+…then call \`executeBash({ command: "git status --short" })\`.
 `.trim()

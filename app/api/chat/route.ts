@@ -1,8 +1,10 @@
 import { streamText, convertToModelMessages, tool, jsonSchema } from "ai"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { Octokit } from "@octokit/rest"
+import { spawn } from "node:child_process"
 import _sodium from "libsodium-wrappers"
 import { SHELL_PROMPT_FRAGMENT } from "@/lib/shell-tool"
+import { broadcastToConsole } from "@/lib/terminal-bus"
 
 const google = createGoogleGenerativeAI({
   apiKey: process.env.GOOGLE_API_KEY,
@@ -33,6 +35,109 @@ type ManageActionsInput   = { repo: string; workflowFile: string; content: strin
 type CreatePRInput        = { repo: string; title: string; head: string; base: string; body?: string }
 type MergePRInput         = { repo: string; prNumber: number; mergeMethod?: "merge" | "squash" | "rebase"; commitTitle?: string }
 type MergeBranchesInput   = { repo: string; base: string; head: string; message?: string }
+type ExecuteBashInput     = { command: string; timeoutMs?: number }
+interface ExecuteBashOutput {
+  command:    string
+  exitCode:   number | null
+  signal:     string | null
+  stdout:     string
+  stderr:     string
+  durationMs: number
+  truncated:  boolean
+  streamedToConsole: boolean
+}
+
+// ── executeBash helpers ──────────────────────────────────────────────────────
+
+const WORKSPACE_CWD     = "/home/runner/workspace"
+const MAX_OUTPUT_BYTES  = 32 * 1024     // 32 KB per stream returned to the LLM
+const DEFAULT_TIMEOUT   = 30_000        // 30 s
+const MAX_TIMEOUT       = 120_000       // 2 min hard cap
+
+/** ANSI: cyan banner used to mark AI-initiated executions in the live console. */
+const consoleBanner = (cmd: string) =>
+  `\r\n\x1b[36m\x1b[1m[AI]\x1b[0m \x1b[2m$ ${cmd.replace(/\r?\n/g, " ⏎ ")}\x1b[0m\r\n`
+
+const consoleFooter = (code: number | null, signal: string | null, ms: number) => {
+  const status = signal
+    ? `\x1b[33msignal=${signal}\x1b[0m`
+    : code === 0
+      ? `\x1b[32mexit=0\x1b[0m`
+      : `\x1b[31mexit=${code}\x1b[0m`
+  return `\x1b[2m[AI] ${status} (${ms}ms)\x1b[0m\r\n`
+}
+
+/**
+ * Spawn a shell command in /home/runner/workspace, mirror its output to the
+ * live System Console (if open), capture up to MAX_OUTPUT_BYTES per stream,
+ * and resolve with a structured summary for the LLM.
+ */
+function runBash(command: string, timeoutMs: number): Promise<ExecuteBashOutput> {
+  return new Promise((resolve) => {
+    const start  = Date.now()
+    const child  = spawn("/bin/bash", ["-c", command], {
+      cwd: WORKSPACE_CWD,
+      env: { ...process.env, TERM: "xterm-256color" },
+    })
+
+    let stdoutBuf = ""
+    let stderrBuf = ""
+    let truncated = false
+
+    const streamedToConsole = broadcastToConsole(consoleBanner(command))
+
+    const append = (buf: string, chunk: string): string => {
+      if (buf.length >= MAX_OUTPUT_BYTES) { truncated = true; return buf }
+      const room = MAX_OUTPUT_BYTES - buf.length
+      if (chunk.length > room) {
+        truncated = true
+        return buf + chunk.slice(0, room) + "\n…[truncated]"
+      }
+      return buf + chunk
+    }
+
+    child.stdout.on("data", (b: Buffer) => {
+      const s = b.toString("utf-8")
+      stdoutBuf = append(stdoutBuf, s)
+      // Convert LF → CRLF so xterm renders cleanly without raw-mode TTY
+      broadcastToConsole(s.replace(/\n/g, "\r\n"))
+    })
+    child.stderr.on("data", (b: Buffer) => {
+      const s = b.toString("utf-8")
+      stderrBuf = append(stderrBuf, s)
+      broadcastToConsole(`\x1b[31m${s.replace(/\n/g, "\r\n")}\x1b[0m`)
+    })
+
+    const timer = setTimeout(() => {
+      try { child.kill("SIGTERM") } catch { /* ignore */ }
+      // Hard kill if still alive after grace period
+      setTimeout(() => { try { child.kill("SIGKILL") } catch { /* ignore */ } }, 2_000)
+    }, timeoutMs)
+
+    child.on("error", (err) => {
+      clearTimeout(timer)
+      const ms = Date.now() - start
+      broadcastToConsole(`\x1b[31m[AI] spawn error: ${err.message}\x1b[0m\r\n`)
+      resolve({
+        command, exitCode: null, signal: null,
+        stdout: stdoutBuf,
+        stderr: (stderrBuf ? stderrBuf + "\n" : "") + `spawn error: ${err.message}`,
+        durationMs: ms, truncated, streamedToConsole,
+      })
+    })
+
+    child.on("exit", (code, signal) => {
+      clearTimeout(timer)
+      const ms = Date.now() - start
+      broadcastToConsole(consoleFooter(code, signal, ms))
+      resolve({
+        command, exitCode: code, signal,
+        stdout: stdoutBuf, stderr: stderrBuf,
+        durationMs: ms, truncated, streamedToConsole,
+      })
+    })
+  })
+}
 
 // ─── Tools ─────────────────────────────────────────────────────────────────────
 
@@ -334,6 +439,35 @@ const githubTools = {
         }
       } catch (err: unknown) {
         return { error: `Failed to merge pull request: ${err instanceof Error ? err.message : String(err)}` }
+      }
+    },
+  }),
+
+  // ── Shell Executor ─────────────────────────────────────────────────────────
+
+  executeBash: tool<ExecuteBashInput, ExecuteBashOutput | { error: string }>({
+    description:
+      "Execute a shell command in the user's workspace (/home/runner/workspace). " +
+      "Output streams LIVE to the user's System Console (Settings → System Console) so they can watch the work happen, " +
+      "and the captured stdout/stderr are returned to you so you can verify the result. " +
+      "Use this for git operations, running tests, package installs, file inspection, build commands, etc. " +
+      "DESTRUCTIVE COMMANDS (rm -rf, git reset --hard, force-push, DROP TABLE, etc.) — explain the impact and ASK FOR CONFIRMATION before calling this tool.",
+    inputSchema: jsonSchema<ExecuteBashInput>({
+      type: "object",
+      properties: {
+        command:   { type: "string", description: "Single bash command line. Chain multiple steps with && or ;." },
+        timeoutMs: { type: "number", description: `Timeout in milliseconds (default ${DEFAULT_TIMEOUT}, max ${MAX_TIMEOUT}).` },
+      },
+      required: ["command"],
+    }),
+    execute: async ({ command, timeoutMs }: ExecuteBashInput) => {
+      const cmd = (command ?? "").trim()
+      if (!cmd) return { error: "Command must be a non-empty string." }
+      const t = Math.min(Math.max(typeof timeoutMs === "number" ? timeoutMs : DEFAULT_TIMEOUT, 1000), MAX_TIMEOUT)
+      try {
+        return await runBash(cmd, t)
+      } catch (err: unknown) {
+        return { error: `executeBash failed: ${err instanceof Error ? err.message : String(err)}` }
       }
     },
   }),
