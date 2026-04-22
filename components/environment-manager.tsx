@@ -1,20 +1,29 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import {
   Eye, EyeOff, Save, Check, RefreshCw, KeyRound,
-  AlertCircle, Loader2, Plus, X,
+  AlertCircle, Loader2, Plus, X, Pencil, Trash2,
 } from "lucide-react"
 
 interface EnvEntry { key: string; value: string }
 
 interface RowState {
-  draft:    string
-  saved:    string
-  visible:  boolean
-  saving:   boolean
-  savedAt:  number | null
-  error:    string | null
+  draft:        string
+  saved:        string
+  visible:      boolean
+  saving:       boolean
+  savedAt:      number | null
+  error:        string | null
+  // Rename
+  renaming:     boolean
+  renameDraft:  string
+  renameSaving: boolean
+  renameError:  string | null
+  // Delete confirmation
+  pendingDelete: boolean
+  deleting:      boolean
+  deleteError:   string | null
 }
 
 interface DraftEntry {
@@ -28,14 +37,22 @@ interface DraftEntry {
 }
 
 const KEY_RE = /^[A-Z_][A-Z0-9_]*$/
+const DELETE_CONFIRM_TIMEOUT_MS = 5000
 
 const initialRow = (value: string): RowState => ({
-  draft:   value,
-  saved:   value,
-  visible: false,
-  saving:  false,
-  savedAt: null,
-  error:   null,
+  draft:         value,
+  saved:         value,
+  visible:       false,
+  saving:        false,
+  savedAt:       null,
+  error:         null,
+  renaming:      false,
+  renameDraft:   "",
+  renameSaving:  false,
+  renameError:   null,
+  pendingDelete: false,
+  deleting:      false,
+  deleteError:   null,
 })
 
 const newDraft = (): DraftEntry => ({
@@ -53,6 +70,10 @@ export function EnvironmentManager() {
   const [drafts,    setDrafts]    = useState<DraftEntry[]>([])
   const [loading,   setLoading]   = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+
+  // Auto-clear pendingDelete after timeout. Track active timers per-key so we
+  // can cancel them when the user confirms / cancels manually.
+  const deleteTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
   // ── Load entries ───────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -76,9 +97,14 @@ export function EnvironmentManager() {
 
   useEffect(() => { load() }, [load])
 
+  useEffect(() => () => {
+    // Clear any outstanding confirm timers on unmount
+    Object.values(deleteTimers.current).forEach(clearTimeout)
+  }, [])
+
   // ── Existing-row helpers ───────────────────────────────────────────────────
   const patchRow = (key: string, partial: Partial<RowState>) =>
-    setRows((prev) => ({ ...prev, [key]: { ...prev[key], ...partial } }))
+    setRows((prev) => (prev[key] ? { ...prev, [key]: { ...prev[key], ...partial } } : prev))
 
   const handleChange     = (key: string, draft: string) => patchRow(key, { draft, error: null })
   const toggleVisibility = (key: string) => patchRow(key, { visible: !rows[key]?.visible })
@@ -108,6 +134,118 @@ export function EnvironmentManager() {
       }, 2600)
     } catch (err) {
       patchRow(key, { saving: false, error: err instanceof Error ? err.message : "Save failed" })
+    }
+  }
+
+  // ── Rename helpers ─────────────────────────────────────────────────────────
+  const startRename  = (key: string) =>
+    patchRow(key, { renaming: true, renameDraft: key, renameError: null })
+
+  const cancelRename = (key: string) =>
+    patchRow(key, { renaming: false, renameDraft: "", renameError: null, renameSaving: false })
+
+  const commitRename = async (key: string) => {
+    const row = rows[key]
+    if (!row) return
+    const newKey = row.renameDraft.trim()
+
+    if (newKey === key) { cancelRename(key); return }
+    if (!KEY_RE.test(newKey)) {
+      patchRow(key, { renameError: "Invalid format (UPPER_SNAKE_CASE letters, digits, underscores)." })
+      return
+    }
+    if (rows[newKey]) {
+      patchRow(key, { renameError: `${newKey} already exists.` })
+      return
+    }
+
+    patchRow(key, { renameSaving: true, renameError: null })
+    try {
+      const res = await fetch("/api/settings/env", {
+        method:  "PUT",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ key: newKey, value: row.saved, oldKey: key }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error ?? `Rename failed: ${res.status}`)
+
+      // Re-key the row in local state, preserving its position in `order`
+      setRows((prev) => {
+        const { [key]: old, ...rest } = prev
+        if (!old) return prev
+        return {
+          ...rest,
+          [newKey]: {
+            ...old,
+            renaming:     false,
+            renameDraft:  "",
+            renameError:  null,
+            renameSaving: false,
+            savedAt:      Date.now(),
+          },
+        }
+      })
+      setOrder((prev) => prev.map((k) => (k === key ? newKey : k)))
+
+      setTimeout(() => {
+        setRows((prev) => {
+          const r = prev[newKey]
+          if (!r || r.savedAt === null) return prev
+          if (Date.now() - r.savedAt < 2500) return prev
+          return { ...prev, [newKey]: { ...r, savedAt: null } }
+        })
+      }, 2600)
+    } catch (err) {
+      patchRow(key, {
+        renameSaving: false,
+        renameError:  err instanceof Error ? err.message : "Rename failed",
+      })
+    }
+  }
+
+  // ── Delete helpers ─────────────────────────────────────────────────────────
+  const requestDelete = (key: string) => {
+    patchRow(key, { pendingDelete: true, deleteError: null })
+    if (deleteTimers.current[key]) clearTimeout(deleteTimers.current[key])
+    deleteTimers.current[key] = setTimeout(() => {
+      patchRow(key, { pendingDelete: false })
+      delete deleteTimers.current[key]
+    }, DELETE_CONFIRM_TIMEOUT_MS)
+  }
+
+  const cancelDelete = (key: string) => {
+    if (deleteTimers.current[key]) {
+      clearTimeout(deleteTimers.current[key])
+      delete deleteTimers.current[key]
+    }
+    patchRow(key, { pendingDelete: false, deleteError: null })
+  }
+
+  const confirmDelete = async (key: string) => {
+    if (deleteTimers.current[key]) {
+      clearTimeout(deleteTimers.current[key])
+      delete deleteTimers.current[key]
+    }
+    patchRow(key, { deleting: true, deleteError: null })
+    try {
+      const res = await fetch(`/api/settings/env?key=${encodeURIComponent(key)}`, {
+        method: "DELETE",
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error ?? `Delete failed: ${res.status}`)
+
+      // Drop from local state
+      setRows((prev) => {
+        const { [key]: _gone, ...rest } = prev
+        return rest
+      })
+      setOrder((prev) => prev.filter((k) => k !== key))
+    } catch (err) {
+      patchRow(key, {
+        deleting:      false,
+        pendingDelete: false,
+        deleteError:   err instanceof Error ? err.message : "Delete failed",
+      })
     }
   }
 
@@ -234,17 +372,74 @@ export function EnvironmentManager() {
           if (!row) return null
           const dirty  = row.draft !== row.saved
           const showSavedPill = row.savedAt !== null && Date.now() - row.savedAt < 2600
+          const renameValid   = KEY_RE.test(row.renameDraft.trim())
+          const renameChanged = row.renameDraft.trim() !== key
 
           return (
             <div key={key} className="group">
-              <div className="flex items-center justify-between mb-1.5 gap-2">
-                <label
-                  htmlFor={`env-${key}`}
-                  className="text-[11px] font-mono font-semibold text-foreground tracking-wide truncate"
-                >
-                  {key}
-                </label>
-                <div className="flex items-center gap-1.5">
+              {/* ─── Label row: key name (or rename input) + status pills + edit/delete ─── */}
+              <div className="flex items-center justify-between mb-1.5 gap-2 min-h-[22px]">
+
+                {/* Key label OR rename input */}
+                {row.renaming ? (
+                  <div className="flex items-center gap-1 flex-1 min-w-0">
+                    <input
+                      type="text"
+                      value={row.renameDraft}
+                      onChange={(e) =>
+                        patchRow(key, { renameDraft: e.target.value.toUpperCase(), renameError: null })
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter")  { e.preventDefault(); commitRename(key) }
+                        if (e.key === "Escape") { cancelRename(key) }
+                      }}
+                      autoFocus
+                      spellCheck={false}
+                      autoComplete="off"
+                      placeholder={key}
+                      className={`flex-1 min-w-0 px-2 py-1 text-[11px] font-mono font-semibold tracking-wide
+                                  bg-[#0f0f0f] text-foreground rounded border placeholder:text-muted-foreground/40
+                                  focus:outline-none focus:ring-1 transition-colors
+                                  ${row.renameDraft && !renameValid
+                                    ? "border-red-500/50 focus:border-red-400 focus:ring-red-400/40"
+                                    : "border-accent/50 focus:border-accent focus:ring-accent/40"}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => commitRename(key)}
+                      disabled={!renameValid || !renameChanged || row.renameSaving}
+                      title="Save new name (Enter)"
+                      className="flex items-center justify-center w-6 h-6 rounded
+                                 text-accent bg-accent/10 border border-accent/30
+                                 hover:bg-accent/20 hover:border-accent/60
+                                 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                    >
+                      {row.renameSaving
+                        ? <Loader2 className="w-3 h-3 animate-spin" />
+                        : <Check className="w-3 h-3" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => cancelRename(key)}
+                      title="Cancel rename (Esc)"
+                      className="flex items-center justify-center w-6 h-6 rounded
+                                 text-muted-foreground hover:text-foreground
+                                 hover:bg-muted border border-transparent hover:border-border transition-all"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <label
+                    htmlFor={`env-${key}`}
+                    className="text-[11px] font-mono font-semibold text-foreground tracking-wide truncate flex-1 min-w-0"
+                  >
+                    {key}
+                  </label>
+                )}
+
+                {/* Right-side cluster: pills + action icons */}
+                <div className="flex items-center gap-1.5 flex-shrink-0">
                   {showSavedPill && (
                     <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium
                                      text-green-300 bg-green-500/10 border border-green-500/30">
@@ -252,15 +447,82 @@ export function EnvironmentManager() {
                       Saved
                     </span>
                   )}
-                  {dirty && !showSavedPill && (
+                  {dirty && !showSavedPill && !row.renaming && (
                     <span className="px-1.5 py-0.5 rounded text-[10px] font-medium
                                      text-accent bg-accent/10 border border-accent/30">
                       Modified
                     </span>
                   )}
+
+                  {/* Edit / Delete cluster — hidden during rename, replaced during pendingDelete */}
+                  {!row.renaming && !row.pendingDelete && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => startRename(key)}
+                        title="Rename key"
+                        aria-label={`Rename ${key}`}
+                        className="flex items-center justify-center w-6 h-6 rounded
+                                   text-muted-foreground hover:text-accent hover:bg-accent/10
+                                   border border-transparent hover:border-accent/30 transition-all"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => requestDelete(key)}
+                        disabled={row.deleting}
+                        title="Delete key"
+                        aria-label={`Delete ${key}`}
+                        className="flex items-center justify-center w-6 h-6 rounded
+                                   text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10
+                                   border border-transparent hover:border-rose-500/30
+                                   disabled:opacity-50 transition-all"
+                      >
+                        {row.deleting
+                          ? <Loader2 className="w-3 h-3 animate-spin text-rose-400" />
+                          : <Trash2 className="w-3 h-3" />}
+                      </button>
+                    </>
+                  )}
+
+                  {/* Inline confirm-delete state */}
+                  {row.pendingDelete && (
+                    <div className="flex items-center gap-1 pl-1.5 pr-1 py-0.5 rounded
+                                    bg-rose-500/10 border border-rose-500/40">
+                      <span className="text-[10px] font-medium text-rose-300">Confirm?</span>
+                      <button
+                        type="button"
+                        onClick={() => confirmDelete(key)}
+                        title="Yes, delete"
+                        className="flex items-center justify-center w-5 h-5 rounded
+                                   text-white bg-rose-500 hover:bg-rose-400 transition-colors"
+                      >
+                        <Check className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => cancelDelete(key)}
+                        title="Cancel"
+                        className="flex items-center justify-center w-5 h-5 rounded
+                                   text-rose-300 hover:text-rose-200 hover:bg-rose-500/20 transition-colors"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
+              {/* Rename error (above value input) */}
+              {row.renameError && (
+                <p className="mb-1 text-[10px] text-red-300/90 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3 flex-shrink-0" />
+                  {row.renameError}
+                </p>
+              )}
+
+              {/* ─── Value input + Save ─── */}
               <div className="flex items-stretch gap-1.5">
                 <div className="relative flex-1 min-w-0">
                   <input
@@ -274,10 +536,11 @@ export function EnvironmentManager() {
                     placeholder="(empty)"
                     spellCheck={false}
                     autoComplete="off"
+                    disabled={row.renaming}
                     className="w-full pl-3 pr-10 py-2 text-xs font-mono bg-[#0f0f0f] text-foreground
                                rounded-md border border-border placeholder:text-muted-foreground/40
                                focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/40
-                               transition-colors"
+                               disabled:opacity-50 transition-colors"
                   />
                   <button
                     type="button"
@@ -294,7 +557,7 @@ export function EnvironmentManager() {
                 <button
                   type="button"
                   onClick={() => handleSave(key)}
-                  disabled={!dirty || row.saving}
+                  disabled={!dirty || row.saving || row.renaming}
                   title="Save (⌘/Ctrl + Enter)"
                   className="flex items-center gap-1 px-3 text-xs font-medium rounded-md
                              bg-accent/10 text-accent border border-accent/30
@@ -311,6 +574,12 @@ export function EnvironmentManager() {
                 <p className="mt-1 text-[10px] text-red-300/90 flex items-center gap-1">
                   <AlertCircle className="w-3 h-3 flex-shrink-0" />
                   {row.error}
+                </p>
+              )}
+              {row.deleteError && (
+                <p className="mt-1 text-[10px] text-rose-300/90 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3 flex-shrink-0" />
+                  {row.deleteError}
                 </p>
               )}
             </div>
@@ -337,7 +606,7 @@ export function EnvironmentManager() {
                   onClick={() => removeDraft(d.id)}
                   title="Discard draft"
                   className="flex items-center justify-center w-6 h-6 rounded text-muted-foreground
-                             hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                             hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
