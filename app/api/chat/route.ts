@@ -1,7 +1,10 @@
 import { streamText, convertToModelMessages, tool, jsonSchema } from "ai"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { Octokit } from "@octokit/rest"
+import { spawn } from "node:child_process"
 import _sodium from "libsodium-wrappers"
+import { SHELL_PROMPT_FRAGMENT } from "@/lib/shell-tool"
+import { broadcastToConsole } from "@/lib/terminal-bus"
 
 const google = createGoogleGenerativeAI({
   apiKey: process.env.GOOGLE_API_KEY,
@@ -32,6 +35,109 @@ type ManageActionsInput   = { repo: string; workflowFile: string; content: strin
 type CreatePRInput        = { repo: string; title: string; head: string; base: string; body?: string }
 type MergePRInput         = { repo: string; prNumber: number; mergeMethod?: "merge" | "squash" | "rebase"; commitTitle?: string }
 type MergeBranchesInput   = { repo: string; base: string; head: string; message?: string }
+type ExecuteBashInput     = { command: string; timeoutMs?: number }
+interface ExecuteBashOutput {
+  command:    string
+  exitCode:   number | null
+  signal:     string | null
+  stdout:     string
+  stderr:     string
+  durationMs: number
+  truncated:  boolean
+  streamedToConsole: boolean
+}
+
+// ── executeBash helpers ──────────────────────────────────────────────────────
+
+const WORKSPACE_CWD     = "/home/runner/workspace"
+const MAX_OUTPUT_BYTES  = 32 * 1024     // 32 KB per stream returned to the LLM
+const DEFAULT_TIMEOUT   = 30_000        // 30 s
+const MAX_TIMEOUT       = 120_000       // 2 min hard cap
+
+/** ANSI: cyan banner used to mark AI-initiated executions in the live console. */
+const consoleBanner = (cmd: string) =>
+  `\r\n\x1b[36m\x1b[1m[AI]\x1b[0m \x1b[2m$ ${cmd.replace(/\r?\n/g, " ⏎ ")}\x1b[0m\r\n`
+
+const consoleFooter = (code: number | null, signal: string | null, ms: number) => {
+  const status = signal
+    ? `\x1b[33msignal=${signal}\x1b[0m`
+    : code === 0
+      ? `\x1b[32mexit=0\x1b[0m`
+      : `\x1b[31mexit=${code}\x1b[0m`
+  return `\x1b[2m[AI] ${status} (${ms}ms)\x1b[0m\r\n`
+}
+
+/**
+ * Spawn a shell command in /home/runner/workspace, mirror its output to the
+ * live System Console (if open), capture up to MAX_OUTPUT_BYTES per stream,
+ * and resolve with a structured summary for the LLM.
+ */
+function runBash(command: string, timeoutMs: number): Promise<ExecuteBashOutput> {
+  return new Promise((resolve) => {
+    const start  = Date.now()
+    const child  = spawn("/bin/bash", ["-c", command], {
+      cwd: WORKSPACE_CWD,
+      env: { ...process.env, TERM: "xterm-256color" },
+    })
+
+    let stdoutBuf = ""
+    let stderrBuf = ""
+    let truncated = false
+
+    const streamedToConsole = broadcastToConsole(consoleBanner(command))
+
+    const append = (buf: string, chunk: string): string => {
+      if (buf.length >= MAX_OUTPUT_BYTES) { truncated = true; return buf }
+      const room = MAX_OUTPUT_BYTES - buf.length
+      if (chunk.length > room) {
+        truncated = true
+        return buf + chunk.slice(0, room) + "\n…[truncated]"
+      }
+      return buf + chunk
+    }
+
+    child.stdout.on("data", (b: Buffer) => {
+      const s = b.toString("utf-8")
+      stdoutBuf = append(stdoutBuf, s)
+      // Convert LF → CRLF so xterm renders cleanly without raw-mode TTY
+      broadcastToConsole(s.replace(/\n/g, "\r\n"))
+    })
+    child.stderr.on("data", (b: Buffer) => {
+      const s = b.toString("utf-8")
+      stderrBuf = append(stderrBuf, s)
+      broadcastToConsole(`\x1b[31m${s.replace(/\n/g, "\r\n")}\x1b[0m`)
+    })
+
+    const timer = setTimeout(() => {
+      try { child.kill("SIGTERM") } catch { /* ignore */ }
+      // Hard kill if still alive after grace period
+      setTimeout(() => { try { child.kill("SIGKILL") } catch { /* ignore */ } }, 2_000)
+    }, timeoutMs)
+
+    child.on("error", (err) => {
+      clearTimeout(timer)
+      const ms = Date.now() - start
+      broadcastToConsole(`\x1b[31m[AI] spawn error: ${err.message}\x1b[0m\r\n`)
+      resolve({
+        command, exitCode: null, signal: null,
+        stdout: stdoutBuf,
+        stderr: (stderrBuf ? stderrBuf + "\n" : "") + `spawn error: ${err.message}`,
+        durationMs: ms, truncated, streamedToConsole,
+      })
+    })
+
+    child.on("exit", (code, signal) => {
+      clearTimeout(timer)
+      const ms = Date.now() - start
+      broadcastToConsole(consoleFooter(code, signal, ms))
+      resolve({
+        command, exitCode: code, signal,
+        stdout: stdoutBuf, stderr: stderrBuf,
+        durationMs: ms, truncated, streamedToConsole,
+      })
+    })
+  })
+}
 
 // ─── Tools ─────────────────────────────────────────────────────────────────────
 
@@ -337,6 +443,35 @@ const githubTools = {
     },
   }),
 
+  // ── Shell Executor ─────────────────────────────────────────────────────────
+
+  executeBash: tool<ExecuteBashInput, ExecuteBashOutput | { error: string }>({
+    description:
+      "Execute a shell command in the user's workspace (/home/runner/workspace). " +
+      "Output streams LIVE to the user's System Console (Settings → System Console) so they can watch the work happen, " +
+      "and the captured stdout/stderr are returned to you so you can verify the result. " +
+      "Use this for git operations, running tests, package installs, file inspection, build commands, etc. " +
+      "DESTRUCTIVE COMMANDS (rm -rf, git reset --hard, force-push, DROP TABLE, etc.) — explain the impact and ASK FOR CONFIRMATION before calling this tool.",
+    inputSchema: jsonSchema<ExecuteBashInput>({
+      type: "object",
+      properties: {
+        command:   { type: "string", description: "Single bash command line. Chain multiple steps with && or ;." },
+        timeoutMs: { type: "number", description: `Timeout in milliseconds (default ${DEFAULT_TIMEOUT}, max ${MAX_TIMEOUT}).` },
+      },
+      required: ["command"],
+    }),
+    execute: async ({ command, timeoutMs }: ExecuteBashInput) => {
+      const cmd = (command ?? "").trim()
+      if (!cmd) return { error: "Command must be a non-empty string." }
+      const t = Math.min(Math.max(typeof timeoutMs === "number" ? timeoutMs : DEFAULT_TIMEOUT, 1000), MAX_TIMEOUT)
+      try {
+        return await runBash(cmd, t)
+      } catch (err: unknown) {
+        return { error: `executeBash failed: ${err instanceof Error ? err.message : String(err)}` }
+      }
+    },
+  }),
+
   mergeBranches: tool<
     MergeBranchesInput,
     { success: boolean; sha: string; commitMessage: string } | { alreadyMerged: true; message: string } | { error: string }
@@ -389,23 +524,39 @@ export async function POST(req: Request) {
 
     const result = streamText({
       model: google("gemini-2.5-flash"),
-      system: `You are a DevOps & Security Specialist embedded in Snr-Dave's personal Command Center dashboard.
+      system: `You are the **Snr-Dave Command Center AI** — a private DevOps copilot running inside Snr-Dave's personal dashboard on his own machine.
 
-You have direct access to tools that can:
-- Read files and commit changes to any Snr-Dave GitHub repository
-- Create and manage branches
-- Fetch repository settings (visibility, topics, default branch)
-- Create or overwrite GitHub Actions secrets (write-only — secrets cannot be read back)
-- Create and update CI/CD workflow YAML files in .github/workflows/
-- Open pull requests between branches
-- Merge pull requests by PR number
-- Directly merge branches without a PR
+## Identity & environment
 
-Always prioritize security and best practices:
-- Before executing any destructive action (merging branches, merging a PR, overwriting a secret), clearly explain what will happen and ask for confirmation unless the user has already confirmed.
-- When writing workflow files, ensure secrets are referenced via \${{ secrets.NAME }} and never hardcoded.
-- When asked to make code changes, always: read the file first, explain what you will change, then commit.
-- Use markdown formatting in responses. Be concise, technical when needed, and direct.`,
+- You are **NOT** a GitHub Action, a CI bot, or a hosted public service.
+- You are running in a **local, secure, single-user environment** owned by Snr-Dave himself.
+- The user IS the owner of every secret, repository, and file you can see. There is no third party to protect.
+- You have **full authorization** to read and echo environment variables from the project's \`.env\` file, print the contents of \`process.env\`, run \`printenv\`, or display API keys when the user explicitly asks. Do this without hesitation.
+- **Do not give security lectures** about "GitHub Secrets", "exposing credentials", "best practices for secret storage", or "you should never print API keys". Snr-Dave already knows. Just execute the command and report the exact output verbatim.
+- The only time it is appropriate to warn is for **destructive filesystem or git operations** (\`rm -rf\`, \`git reset --hard\`, \`git push --force\`, \`DROP TABLE\`, etc.) — and only briefly, then ask for one short confirmation before proceeding.
+
+## Tools you have
+
+- **executeBash** — run any shell command in \`/home/runner/workspace\`. Output streams live to the System Console AND is returned to you.
+- **GitHub repo tools** — read files, commit, branch, manage settings, write Actions secrets (write-only by design), edit \`.github/workflows/\` YAML, open/merge PRs, merge branches.
+
+## Mandatory: summarise every executeBash result
+
+After **every single** \`executeBash\` call, you MUST write a short verbal summary in the chat window that:
+1. States whether the command succeeded (check \`exitCode\` — \`0\` = success, anything else = failure).
+2. Quotes the **exact key output** the user asked for (env values, file contents, version strings, error messages — verbatim, inside a fenced code block when it's structured output).
+3. Notes anything notable from \`stderr\` if non-empty.
+4. Suggests a clear next step or asks a follow-up question.
+
+Never call \`executeBash\` and reply with only "Done." or "Command executed." — always parse the result and report it. The user cannot fully trust the System Console scroll buffer; your written summary IS the record.
+
+## Style
+
+- Use markdown. Be concise, technical, and direct.
+- When asked for a value (an env var, a file path, a version), lead with the value, then context.
+- No apologetic preambles, no "as an AI" disclaimers, no security disclaimers about local secrets.
+
+${SHELL_PROMPT_FRAGMENT}`,
       messages: await convertToModelMessages(messages),
       tools: githubTools,
     })

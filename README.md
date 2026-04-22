@@ -51,6 +51,21 @@
 - Auto-checks every 60 seconds, manual refresh button available
 - All-green · partial-warning · offline states with distinct colour coding
 
+### ⚙️ Settings Panel
+A right-edge slide-over (also accessible from the header gear icon) hosting two tabs:
+
+**System Console** — full-featured terminal embedded in the dashboard
+- Live `bash` shell bridged via Socket.IO over `pages/api/terminal/shell.ts`
+- xterm.js with copy-on-select, font-size A−/A+ controls (10–20 px)
+- Full-height toggle expands the panel to cover the whole viewport for an immersive console
+- `Ctrl+L` / **Clear** redraws the prompt; **Copy** lifts the current selection to the clipboard
+
+**Environment** — Dynamic Secret Creator
+- Lists every variable in `.env` with masked values (`••••••`) and a per-row eye toggle
+- Inline editing with `⌘/Ctrl + Enter` save shortcut and a green **Saved** confirmation pill
+- **+ Add Secret** spawns a new draft row with a validated key field — keys must match `^[A-Z_][A-Z0-9_]*$`
+- Backed by `pages/api/settings/env.ts` which reads/writes `.env` while preserving comments, blank lines, indentation, and quoting
+
 ---
 
 ## 🛠️ Tech Stack
@@ -72,15 +87,45 @@
 
 ## 🤖 GitHub Agent Tools
 
-The AI assistant has direct access to your GitHub repositories via three built-in tools. These run **server-side** using `GITHUB_TOKEN` — the model decides when to call them based on your messages.
+The AI assistant has direct access to your GitHub repositories via nine built-in tools. These run **server-side** using `GITHUB_TOKEN` — the model decides when to call them based on your messages.
 
-| Tool | What it does |
-|------|-------------|
-| `readFile` | Read any file from any `Snr-Dave` repo at any ref |
-| `createBranch` | Create a new branch from a specified base |
-| `commitFile` | Create or update a file and commit it to a branch |
+| Category | Tool | What it does |
+|----------|------|-------------|
+| File & Branch | `readFile` | Read any file from any `Snr-Dave` repo at any ref |
+| File & Branch | `createBranch` | Create a new branch from a specified base |
+| File & Branch | `commitFile` | Create or update a file and commit it to a branch |
+| Settings | `getRepoSettings` | Visibility, topics, default branch |
+| Settings | `setRepoSecret` | Create / overwrite a GitHub Actions secret (write-only) |
+| Settings | `manageActions` | Create / update workflow YAML in `.github/workflows/` |
+| PR & Merge | `createPullRequest` | Open a PR between two branches |
+| PR & Merge | `mergePullRequest` | Merge a PR by number (merge / squash / rebase) |
+| PR & Merge | `mergeBranches` | Direct branch sync without a PR |
 
 > Built with **Vercel AI SDK v6** `tool()` + `jsonSchema<T>()` — up to 10 chained tool steps per conversation turn.
+
+---
+
+## 🖥️ System Console & AI Shell Bridge
+
+The **System Console** tab in Settings runs a live `bash -i` process inside the workspace, streamed to xterm.js via Socket.IO at `path: /api/terminal/socket.io`. The shell is spawned per-connection in `/home/runner/workspace` with `TERM=xterm-256color`, and is killed with `SIGHUP` on disconnect.
+
+**AI Shell Bridge — Phase 1** (`lib/shell-tool.ts`)
+
+The chat assistant is prompted with a `SHELL_PROMPT_FRAGMENT` instructing it to emit shell commands inside fenced blocks tagged **`bash-exec`**:
+
+````markdown
+```bash-exec
+git status --short
+```
+````
+
+The library exposes:
+- `formatBashExec(command)` — wrap a command in a `bash-exec` fence
+- `parseBashExec(text)` — extract every `bash-exec` block from a markdown payload
+- `hasBashExec(text)` — fast boolean check
+- `BASH_EXEC_LANG` constant + the canonical prompt fragment
+
+Phase 2 will wire a one-click **Run in Console** action in the chat UI that pushes the command into the active terminal socket.
 
 ---
 
@@ -102,12 +147,23 @@ snr-dave-ai-assistant/
 │   └── page.tsx                  # Main dashboard page
 ├── components/
 │   ├── chat-window.tsx           # Streaming AI chat interface
-│   ├── dashboard-header.tsx      # Top navigation bar
+│   ├── dashboard-header.tsx      # Top navigation bar (opens Settings panel)
 │   ├── github-feed.tsx           # Live GitHub activity feed
 │   ├── projects-grid.tsx         # Repository cards grid
-│   └── system-status.tsx         # Health monitoring bar
+│   ├── system-status.tsx         # Health monitoring bar
+│   ├── settings-panel.tsx        # Slide-over with System Console + Environment tabs
+│   ├── dashboard-terminal.tsx    # Terminal header (font size, copy, clear, full-height)
+│   ├── xterm-core.tsx            # xterm.js + Socket.IO client (dynamic, SSR-disabled)
+│   └── environment-manager.tsx   # .env editor with masking, eye-toggle, Add Secret
+├── pages/
+│   └── api/
+│       ├── terminal/
+│       │   └── shell.ts          # Socket.IO bash bridge (path /api/terminal/socket.io)
+│       └── settings/
+│           └── env.ts            # GET / PUT for .env with format preservation
 ├── lib/
-│   └── projects.ts               # Project type definitions
+│   ├── projects.ts               # Project type definitions
+│   └── shell-tool.ts             # AI Shell Bridge — bash-exec format / parse helpers
 ├── attached_assets/
 │   └── screenshots/
 │       └── dashboard-preview.jpg # Dashboard preview image
@@ -127,6 +183,20 @@ Configure these as **Replit Secrets** (or `.env.local` for local dev):
 | `GITHUB_TOKEN` | ✅ Yes | GitHub PAT — authenticated API calls + AI agent tools |
 
 > Both secrets are used **server-side only** — never exposed to the browser.
+
+### Adding secrets at runtime
+
+Three ways to set / rotate a value, in increasing order of friction:
+
+1. **Settings → Environment tab** (recommended for app-managed `.env`)
+   - Click the gear icon in the dashboard header → **Environment**.
+   - Click **+ Add Secret**, enter a key matching `^[A-Z_][A-Z0-9_]*$` (the input auto-uppercases and validates live), enter the value, hit **Save** (or `⌘/Ctrl + Enter`).
+   - The variable is appended to `.env` in the workspace root with `0600` permissions, with whitespace/quotes auto-escaped. Existing rows can be edited inline; the eye icon toggles the masked display.
+   - **Restart the dev workflow** (or hit "Restart" in the Replit UI) so libraries that snapshot env at boot pick up the change.
+
+2. **Replit Secrets panel** — for values you never want stored in the repo. Replit injects these into `process.env` at boot; they take precedence over `.env`.
+
+3. **Edit `.env` directly** — the file format is preserved by the API, so manual edits and UI edits coexist safely (comments and blank lines are kept intact).
 
 ---
 
@@ -196,6 +266,21 @@ Authenticated server-side with `GITHUB_TOKEN`.
 
 ---
 
+### `GET /api/settings/env`
+Returns every entry parsed from `.env`, merged with the seeded key list so the UI is useful even before the file exists.
+
+```json
+{ "entries": [{ "key": "GOOGLE_API_KEY", "value": "" }, …] }
+```
+
+### `PUT /api/settings/env`
+Upsert a single variable. Body: `{ "key": string, "value": string }`. Validates `key` against `^[A-Z_][A-Z0-9_]*$`, caps `value` at 8 KB, auto-quotes values containing whitespace / `#` / `=` / quotes (with proper escaping), and preserves all unrelated lines (comments, blanks, indentation, quoting style of other keys).
+
+### `GET /api/terminal/shell`
+Lazy-initialises a Socket.IO server at `path: /api/terminal/socket.io`. Each client connection spawns a `bash -i` child process in `/home/runner/workspace`; stdout/stderr stream back as `output` events, client `input` events are piped to stdin. Disconnect sends `SIGHUP`.
+
+---
+
 ## 🎨 Design System
 
 ### Colour Palette
@@ -228,6 +313,10 @@ Authenticated server-side with `GITHUB_TOKEN`.
 | v1.6 | Fixed TypeScript: `parameters` → `inputSchema` (AI SDK v6 rename) |
 | v1.6 | Fixed ESLint: `react-hooks/set-state-in-effect` in system status |
 | v1.6 | Upgraded model label to `gemini-2.5-flash` across all UI and API |
+| v1.7 | Expanded GitHub agent to 9 tools (settings, secrets, workflows, PRs, merges) |
+| v1.8 | Added Settings panel with embedded **System Console** (xterm + Socket.IO bash bridge) |
+| v1.9 | Added **Environment Manager** with masked editing, validated `+ Add Secret`, `.env` round-trip |
+| v2.0 | AI Shell Bridge Phase 1 — `lib/shell-tool.ts` + `bash-exec` prompt fragment |
 
 ---
 

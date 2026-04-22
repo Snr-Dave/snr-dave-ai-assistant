@@ -22,23 +22,34 @@ function getMessageText(parts: AnyPart[] | undefined): string {
     .join("")
 }
 
-// Matches both "tool-invocation" (legacy shape) and "dynamic-tool" (v6 shape)
+// AI SDK v6 tool part shapes:
+//   Static tools  → part.type = "tool-{toolName}", active states: "input-streaming" | "input-available"
+//   Dynamic tools → part.type = "dynamic-tool",    active states: "input-streaming" | "input-available"
+const ACTIVE_TOOL_STATES = new Set(["input-streaming", "input-available"])
+
 function getActiveToolName(parts: AnyPart[] | undefined): string | undefined {
   if (!parts) return undefined
   for (const p of parts) {
-    if (p.type === "tool-invocation") {
-      const inv = p.toolInvocation as { toolName?: string; state?: string } | undefined
-      if (inv?.state === "call" || inv?.state === "partial-call") return inv.toolName
+    const state = p.state as string | undefined
+    if (!state || !ACTIVE_TOOL_STATES.has(state)) continue
+    // Static tool: type is "tool-<toolName>"
+    if (typeof p.type === "string" && p.type.startsWith("tool-") && p.type !== "tool-approval-request" && p.type !== "tool-approval-response") {
+      return p.type.split("-").slice(1).join("-")
     }
-    if (p.type === "dynamic-tool") {
-      if (p.state === "call" || p.state === "partial-call") return p.toolName as string
+    // Dynamic tool
+    if (p.type === "dynamic-tool" && typeof p.toolName === "string") {
+      return p.toolName as string
     }
   }
   return undefined
 }
 
 function formatToolName(name: string): string {
-  return name.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase()).trim()
+  // "readFile" → "Read File",  "createBranch" → "Create Branch"
+  return name
+    .replace(/([A-Z])/g, " $1")
+    .replace(/^(.)/, (s) => s.toUpperCase())
+    .trim()
 }
 
 function autoResize(el: HTMLTextAreaElement | null, maxPx = 200) {
@@ -109,9 +120,21 @@ export function ChatWindow() {
 
   // ── Effects ──────────────────────────────────────────────────────────────────
 
+  // Pin scroll to bottom on every chunk while streaming, then on every full
+  // message change. We derive a string of "id:length" pairs so React picks up
+  // mutations to the streamed message text (not just array reference changes).
+  const scrollSignature = messages
+    .map((m) => `${m.id}:${getMessageText(m.parts as AnyPart[]).length}`)
+    .join("|")
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages, isActive])
+    // Use "auto" while streaming to keep up with fast token chunks; "smooth"
+    // when idle so the final settle feels nice.
+    messagesEndRef.current?.scrollIntoView({
+      behavior: isActive ? "auto" : "smooth",
+      block:    "end",
+    })
+  }, [scrollSignature, isActive])
 
   useEffect(() => {
     if (editingId && editTextareaRef.current) {
@@ -132,11 +155,11 @@ export function ChatWindow() {
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       handleSubmit()
     }
-    // Plain Enter always inserts a newline (default textarea behaviour — no override needed)
+    // Shift+Enter inserts a newline (default textarea behaviour — no override needed)
   }
 
   const handleCopy = async (text: string, id: string) => {
@@ -240,8 +263,8 @@ export function ChatWindow() {
                 }
               </div>
 
-              {/* Bubble + action strip */}
-              <div className={`flex flex-col gap-1.5 min-w-0 max-w-[80%] ${
+              {/* Bubble + action strip — wider on mobile so terminal summaries breathe */}
+              <div className={`flex flex-col gap-1.5 min-w-0 max-w-[90%] sm:max-w-[85%] md:max-w-[80%] ${
                 isUser ? "items-end" : "items-start"
               }`}>
 
@@ -291,9 +314,11 @@ export function ChatWindow() {
                       {text}
                     </div>
 
-                    {/* Action icons — copy fades in on hover; edit always visible on user messages */}
+                    {/* Action icons:
+                        - Assistant bubbles: Copy is ALWAYS visible (so summaries are easy to grab)
+                        - User bubbles:      Copy fades in on hover, Edit always visible when idle */}
                     <div className="flex items-center gap-0.5">
-                      <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className={isUser ? "opacity-0 group-hover:opacity-100 transition-opacity" : ""}>
                         <ActionBtn
                           title={isCopied ? "Copied!" : "Copy message"}
                           onClick={() => handleCopy(text, message.id)}
@@ -343,7 +368,7 @@ export function ChatWindow() {
               {activeToolName ? (
                 <span className="flex items-center gap-1.5 text-xs min-w-0">
                   <Wrench className="w-3 h-3 flex-shrink-0 text-accent" />
-                  <span className="text-muted-foreground flex-shrink-0">Action:</span>
+                  <span className="text-muted-foreground flex-shrink-0">Assistant Action:</span>
                   <span className="text-accent font-medium truncate">
                     {formatToolName(activeToolName)}…
                   </span>
@@ -374,10 +399,14 @@ export function ChatWindow() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input area */}
+      {/* Input area — pinned to the bottom of the chat container so it doesn't
+          jump when the on-screen keyboard opens on mobile. flex-shrink-0 keeps
+          the messages area as the only flexible region above it. */}
       <form
         onSubmit={(e) => { e.preventDefault(); handleSubmit() }}
-        className="p-4 border-t border-border bg-muted/30"
+        className="flex-shrink-0 sticky bottom-0 p-4 border-t border-border
+                   bg-muted/80 backdrop-blur supports-[backdrop-filter]:bg-muted/60
+                   pb-[max(1rem,env(safe-area-inset-bottom))] z-20"
       >
         <div className="flex items-end gap-2">
           <textarea
@@ -389,7 +418,7 @@ export function ChatWindow() {
             placeholder={
               isActive
                 ? "Waiting for response…"
-                : "Message… (Shift+Enter to send · Enter for new line)"
+                : "Message… (Enter to send · Shift+Enter for new line)"
             }
             disabled={isActive}
             className="flex-1 min-w-0 px-4 py-2.5 bg-background border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-all disabled:opacity-60 resize-none overflow-y-auto leading-relaxed"
