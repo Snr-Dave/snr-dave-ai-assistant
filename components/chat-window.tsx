@@ -120,9 +120,21 @@ export function ChatWindow() {
 
   // ── Effects ──────────────────────────────────────────────────────────────────
 
+  // Pin scroll to bottom on every chunk while streaming, then on every full
+  // message change. We derive a string of "id:length" pairs so React picks up
+  // mutations to the streamed message text (not just array reference changes).
+  const scrollSignature = messages
+    .map((m) => `${m.id}:${getMessageText(m.parts as AnyPart[]).length}`)
+    .join("|")
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages, isActive])
+    // Use "auto" while streaming to keep up with fast token chunks; "smooth"
+    // when idle so the final settle feels nice.
+    messagesEndRef.current?.scrollIntoView({
+      behavior: isActive ? "auto" : "smooth",
+      block:    "end",
+    })
+  }, [scrollSignature, isActive])
 
   useEffect(() => {
     if (editingId && editTextareaRef.current) {
@@ -251,8 +263,8 @@ export function ChatWindow() {
                 }
               </div>
 
-              {/* Bubble + action strip */}
-              <div className={`flex flex-col gap-1.5 min-w-0 max-w-[80%] ${
+              {/* Bubble + action strip — wider on mobile so terminal summaries breathe */}
+              <div className={`flex flex-col gap-1.5 min-w-0 max-w-[90%] sm:max-w-[85%] md:max-w-[80%] ${
                 isUser ? "items-end" : "items-start"
               }`}>
 
@@ -302,9 +314,11 @@ export function ChatWindow() {
                       {text}
                     </div>
 
-                    {/* Action icons — copy fades in on hover; edit always visible on user messages */}
+                    {/* Action icons:
+                        - Assistant bubbles: Copy is ALWAYS visible (so summaries are easy to grab)
+                        - User bubbles:      Copy fades in on hover, Edit always visible when idle */}
                     <div className="flex items-center gap-0.5">
-                      <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className={isUser ? "opacity-0 group-hover:opacity-100 transition-opacity" : ""}>
                         <ActionBtn
                           title={isCopied ? "Copied!" : "Copy message"}
                           onClick={() => handleCopy(text, message.id)}
@@ -385,10 +399,14 @@ export function ChatWindow() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input area */}
+      {/* Input area — pinned to the bottom of the chat container so it doesn't
+          jump when the on-screen keyboard opens on mobile. flex-shrink-0 keeps
+          the messages area as the only flexible region above it. */}
       <form
         onSubmit={(e) => { e.preventDefault(); handleSubmit() }}
-        className="p-4 border-t border-border bg-muted/30"
+        className="flex-shrink-0 sticky bottom-0 p-4 border-t border-border
+                   bg-muted/80 backdrop-blur supports-[backdrop-filter]:bg-muted/60
+                   pb-[max(1rem,env(safe-area-inset-bottom))] z-20"
       >
         <div className="flex items-end gap-2">
           <textarea
