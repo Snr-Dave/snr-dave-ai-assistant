@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react"
 import { Terminal, Settings, Bell } from "lucide-react"
-import { SettingsPanel } from "./settings-panel"
+import { SettingsPanel, type TabId } from "./settings-panel"
 
 function GitHubIcon({ className }: { className?: string }) {
   return (
@@ -14,7 +14,7 @@ function GitHubIcon({ className }: { className?: string }) {
 
 export function DashboardHeader() {
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [activeTab, setActiveTab]       = useState<"console">("console")
+  const [activeTab, setActiveTab]       = useState<TabId>("console")
 
   const openSettings  = useCallback(() => setSettingsOpen(true),  [])
   const closeSettings = useCallback(() => setSettingsOpen(false), [])

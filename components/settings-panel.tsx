@@ -1,14 +1,16 @@
 "use client"
 
 import { useEffect, useRef, useState, useCallback } from "react"
-import { X, Terminal, Settings } from "lucide-react"
-import { DashboardTerminal } from "./dashboard-terminal"
+import { X, Terminal, Settings, KeyRound } from "lucide-react"
+import { DashboardTerminal }    from "./dashboard-terminal"
+import { EnvironmentManager }   from "./environment-manager"
 
 const TABS = [
-  { id: "console", label: "System Console", icon: Terminal },
+  { id: "console", label: "System Console", icon: Terminal  },
+  { id: "env",     label: "Environment",    icon: KeyRound  },
 ] as const
 
-type TabId = (typeof TABS)[number]["id"]
+export type TabId = (typeof TABS)[number]["id"]
 
 interface SettingsPanelProps {
   open:        boolean
@@ -18,17 +20,22 @@ interface SettingsPanelProps {
 }
 
 export function SettingsPanel({ open, activeTab, onTabChange, onClose }: SettingsPanelProps) {
-  const panelRef                    = useRef<HTMLDivElement>(null)
+  const panelRef                      = useRef<HTMLDivElement>(null)
   const [isFullHeight, setFullHeight] = useState(false)
 
   const toggleFullHeight = useCallback(() => setFullHeight((v) => !v), [])
 
-  // Collapse full-height when panel is closed
+  // Full-height only makes sense on the Console tab — collapse if user switches away
+  useEffect(() => {
+    if (activeTab !== "console" && isFullHeight) setFullHeight(false)
+  }, [activeTab, isFullHeight])
+
+  // Collapse full-height when panel closes
   useEffect(() => {
     if (!open) setFullHeight(false)
   }, [open])
 
-  // Escape key: exit full-height first, then close
+  // Escape: exit full-height first, then close
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return
@@ -38,19 +45,18 @@ export function SettingsPanel({ open, activeTab, onTabChange, onClose }: Setting
     return () => document.removeEventListener("keydown", handler)
   }, [open, isFullHeight, onClose])
 
-  // Focus panel when opened
+  // Focus panel on open
   useEffect(() => {
     if (open) panelRef.current?.focus()
   }, [open])
 
-  // Panel width: full-screen when isFullHeight, otherwise right-side drawer
   const panelWidth = isFullHeight
     ? "left-0 max-w-none border-l-0"
     : "max-w-[560px] border-l"
 
   return (
     <>
-      {/* Backdrop — hidden in full-height mode so the terminal feels immersive */}
+      {/* Backdrop */}
       <div
         aria-hidden="true"
         onClick={isFullHeight ? undefined : onClose}
@@ -61,7 +67,7 @@ export function SettingsPanel({ open, activeTab, onTabChange, onClose }: Setting
         }`}
       />
 
-      {/* Slide-over / full-screen panel */}
+      {/* Panel */}
       <aside
         ref={panelRef}
         tabIndex={-1}
@@ -72,7 +78,7 @@ export function SettingsPanel({ open, activeTab, onTabChange, onClose }: Setting
           ${panelWidth}
           ${open ? "translate-x-0" : "translate-x-full"}`}
       >
-        {/* Panel header — hidden in full-height to maximise terminal space */}
+        {/* Header — hidden in full-height for an immersive console */}
         {!isFullHeight && (
           <div className="flex items-center gap-3 px-5 py-4 border-b border-border flex-shrink-0">
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-accent/10">
@@ -94,7 +100,7 @@ export function SettingsPanel({ open, activeTab, onTabChange, onClose }: Setting
           </div>
         )}
 
-        {/* Tab bar — hidden in full-height */}
+        {/* Tab bar */}
         {!isFullHeight && (
           <div className="flex gap-1 px-4 pt-3 pb-0 border-b border-border flex-shrink-0">
             {TABS.map(({ id, label, icon: Icon }) => (
@@ -118,11 +124,16 @@ export function SettingsPanel({ open, activeTab, onTabChange, onClose }: Setting
         {/* Tab content */}
         <div className={`flex-1 min-h-0 ${isFullHeight ? "p-0" : "p-4"}`}>
           {activeTab === "console" && (
-            <div className={`h-full ${isFullHeight ? "rounded-none" : ""}`}>
+            <div className="h-full">
               <DashboardTerminal
                 isFullHeight={isFullHeight}
                 onToggleFullHeight={toggleFullHeight}
               />
+            </div>
+          )}
+          {activeTab === "env" && (
+            <div className="h-full">
+              <EnvironmentManager />
             </div>
           )}
         </div>
