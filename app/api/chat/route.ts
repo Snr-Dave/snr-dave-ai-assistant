@@ -2,6 +2,7 @@ import { streamText, convertToModelMessages, tool, jsonSchema } from "ai"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { Octokit } from "@octokit/rest"
 import _sodium from "libsodium-wrappers"
+import { SHELL_PROMPT_FRAGMENT } from "@/lib/shell-tool"
 
 const google = createGoogleGenerativeAI({
   apiKey: process.env.GOOGLE_API_KEY,
@@ -405,7 +406,9 @@ Always prioritize security and best practices:
 - Before executing any destructive action (merging branches, merging a PR, overwriting a secret), clearly explain what will happen and ask for confirmation unless the user has already confirmed.
 - When writing workflow files, ensure secrets are referenced via \${{ secrets.NAME }} and never hardcoded.
 - When asked to make code changes, always: read the file first, explain what you will change, then commit.
-- Use markdown formatting in responses. Be concise, technical when needed, and direct.`,
+- Use markdown formatting in responses. Be concise, technical when needed, and direct.
+
+${SHELL_PROMPT_FRAGMENT}`,
       messages: await convertToModelMessages(messages),
       tools: githubTools,
     })

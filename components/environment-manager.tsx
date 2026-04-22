@@ -1,27 +1,33 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
-import { Eye, EyeOff, Save, Check, RefreshCw, KeyRound, AlertCircle, Loader2 } from "lucide-react"
+import {
+  Eye, EyeOff, Save, Check, RefreshCw, KeyRound,
+  AlertCircle, Loader2, Plus, X,
+} from "lucide-react"
 
-interface EnvEntry {
-  key:   string
-  value: string
-}
+interface EnvEntry { key: string; value: string }
 
 interface RowState {
-  /** Value as currently shown in the input */
   draft:    string
-  /** Last-known persisted value */
   saved:    string
-  /** Reveal vs. mask */
   visible:  boolean
-  /** Save in flight */
   saving:   boolean
-  /** Time of last successful save (for the “Saved” badge) */
   savedAt:  number | null
-  /** Per-row error message */
   error:    string | null
 }
+
+interface DraftEntry {
+  /** Stable client-side id so React keys remain stable while user types. */
+  id:       string
+  key:      string
+  value:    string
+  visible:  boolean
+  saving:   boolean
+  error:    string | null
+}
+
+const KEY_RE = /^[A-Z_][A-Z0-9_]*$/
 
 const initialRow = (value: string): RowState => ({
   draft:   value,
@@ -32,11 +38,21 @@ const initialRow = (value: string): RowState => ({
   error:   null,
 })
 
+const newDraft = (): DraftEntry => ({
+  id:      `draft-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+  key:     "",
+  value:   "",
+  visible: true,   // Show the value while user is composing it
+  saving:  false,
+  error:   null,
+})
+
 export function EnvironmentManager() {
-  const [rows,         setRows]         = useState<Record<string, RowState>>({})
-  const [order,        setOrder]        = useState<string[]>([])
-  const [loading,      setLoading]      = useState(true)
-  const [loadError,    setLoadError]    = useState<string | null>(null)
+  const [rows,      setRows]      = useState<Record<string, RowState>>({})
+  const [order,     setOrder]     = useState<string[]>([])
+  const [drafts,    setDrafts]    = useState<DraftEntry[]>([])
+  const [loading,   setLoading]   = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   // ── Load entries ───────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -60,18 +76,17 @@ export function EnvironmentManager() {
 
   useEffect(() => { load() }, [load])
 
-  // ── Row helpers ────────────────────────────────────────────────────────────
-  const patch = (key: string, partial: Partial<RowState>) =>
+  // ── Existing-row helpers ───────────────────────────────────────────────────
+  const patchRow = (key: string, partial: Partial<RowState>) =>
     setRows((prev) => ({ ...prev, [key]: { ...prev[key], ...partial } }))
 
-  const handleChange     = (key: string, draft: string) => patch(key, { draft, error: null })
-  const toggleVisibility = (key: string) => patch(key, { visible: !rows[key]?.visible })
+  const handleChange     = (key: string, draft: string) => patchRow(key, { draft, error: null })
+  const toggleVisibility = (key: string) => patchRow(key, { visible: !rows[key]?.visible })
 
   const handleSave = async (key: string) => {
     const row = rows[key]
     if (!row || row.saving || row.draft === row.saved) return
-
-    patch(key, { saving: true, error: null })
+    patchRow(key, { saving: true, error: null })
     try {
       const res = await fetch("/api/settings/env", {
         method:  "PUT",
@@ -81,14 +96,8 @@ export function EnvironmentManager() {
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(json.error ?? `Save failed: ${res.status}`)
 
-      patch(key, {
-        saving:  false,
-        saved:   row.draft,
-        savedAt: Date.now(),
-        error:   null,
-      })
+      patchRow(key, { saving: false, saved: row.draft, savedAt: Date.now(), error: null })
 
-      // Auto-clear the “Saved” pill after 2.5 s
       setTimeout(() => {
         setRows((prev) => {
           const r = prev[key]
@@ -98,10 +107,64 @@ export function EnvironmentManager() {
         })
       }, 2600)
     } catch (err) {
-      patch(key, {
-        saving: false,
-        error:  err instanceof Error ? err.message : "Save failed",
+      patchRow(key, { saving: false, error: err instanceof Error ? err.message : "Save failed" })
+    }
+  }
+
+  // ── Draft (new-entry) helpers ──────────────────────────────────────────────
+  const addDraft = () => setDrafts((prev) => [...prev, newDraft()])
+
+  const patchDraft = (id: string, partial: Partial<DraftEntry>) =>
+    setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, ...partial } : d)))
+
+  const removeDraft = (id: string) =>
+    setDrafts((prev) => prev.filter((d) => d.id !== id))
+
+  const saveDraft = async (id: string) => {
+    const draft = drafts.find((d) => d.id === id)
+    if (!draft || draft.saving) return
+
+    const trimmedKey = draft.key.trim()
+    if (!KEY_RE.test(trimmedKey)) {
+      patchDraft(id, { error: "Key must match ^[A-Z_][A-Z0-9_]* (uppercase, digits, underscores)" })
+      return
+    }
+    if (rows[trimmedKey]) {
+      patchDraft(id, { error: `${trimmedKey} already exists above — edit it directly.` })
+      return
+    }
+    if (drafts.some((d) => d.id !== id && d.key.trim() === trimmedKey)) {
+      patchDraft(id, { error: "Another draft uses this key." })
+      return
+    }
+
+    patchDraft(id, { saving: true, error: null })
+    try {
+      const res = await fetch("/api/settings/env", {
+        method:  "PUT",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ key: trimmedKey, value: draft.value }),
       })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error ?? `Save failed: ${res.status}`)
+
+      // Promote the draft into a regular row with a "Saved" pill
+      setRows((prev) => ({
+        ...prev,
+        [trimmedKey]: { ...initialRow(draft.value), savedAt: Date.now() },
+      }))
+      setOrder((prev) => (prev.includes(trimmedKey) ? prev : [...prev, trimmedKey]))
+      removeDraft(id)
+
+      setTimeout(() => {
+        setRows((prev) => {
+          const r = prev[trimmedKey]
+          if (!r || r.savedAt === null) return prev
+          return { ...prev, [trimmedKey]: { ...r, savedAt: null } }
+        })
+      }, 2600)
+    } catch (err) {
+      patchDraft(id, { saving: false, error: err instanceof Error ? err.message : "Save failed" })
     }
   }
 
@@ -120,17 +183,28 @@ export function EnvironmentManager() {
             Persisted to <code className="text-accent/80">.env</code> · restart may be required
           </p>
         </div>
+
+        <button
+          type="button"
+          onClick={addDraft}
+          title="Add a new secret"
+          className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium rounded-md
+                     text-accent bg-accent/10 border border-accent/30
+                     hover:bg-accent/20 hover:border-accent/60 transition-all"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Add Secret</span>
+        </button>
+
         <button
           type="button"
           onClick={load}
           disabled={loading}
           title="Reload"
-          className="flex items-center gap-1 px-2 py-1.5 text-xs rounded-md text-muted-foreground
-                     hover:text-accent hover:bg-accent/10 border border-transparent hover:border-accent/20
-                     disabled:opacity-50 transition-all"
+          className="flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground
+                     hover:text-accent hover:bg-accent/10 disabled:opacity-50 transition-all"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-          <span className="hidden sm:inline">Reload</span>
         </button>
       </div>
 
@@ -154,6 +228,7 @@ export function EnvironmentManager() {
           </div>
         )}
 
+        {/* Existing rows */}
         {!loading && !loadError && order.map((key) => {
           const row    = rows[key]
           if (!row) return null
@@ -162,7 +237,6 @@ export function EnvironmentManager() {
 
           return (
             <div key={key} className="group">
-              {/* Key + status pills */}
               <div className="flex items-center justify-between mb-1.5 gap-2">
                 <label
                   htmlFor={`env-${key}`}
@@ -187,7 +261,6 @@ export function EnvironmentManager() {
                 </div>
               </div>
 
-              {/* Input + actions */}
               <div className="flex items-stretch gap-1.5">
                 <div className="relative flex-1 min-w-0">
                   <input
@@ -214,10 +287,7 @@ export function EnvironmentManager() {
                                w-7 h-7 rounded text-muted-foreground hover:text-accent hover:bg-accent/10
                                transition-colors"
                   >
-                    {row.visible
-                      ? <EyeOff className="w-3.5 h-3.5" />
-                      : <Eye    className="w-3.5 h-3.5" />
-                    }
+                    {row.visible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                   </button>
                 </div>
 
@@ -232,15 +302,11 @@ export function EnvironmentManager() {
                              disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-accent/10
                              transition-all"
                 >
-                  {row.saving
-                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    : <Save    className="w-3.5 h-3.5" />
-                  }
+                  {row.saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                   <span className="hidden sm:inline">Save</span>
                 </button>
               </div>
 
-              {/* Per-row error */}
               {row.error && (
                 <p className="mt-1 text-[10px] text-red-300/90 flex items-center gap-1">
                   <AlertCircle className="w-3 h-3 flex-shrink-0" />
@@ -251,12 +317,128 @@ export function EnvironmentManager() {
           )
         })}
 
-        {!loading && !loadError && order.length === 0 && (
-          <p className="text-center py-8 text-xs text-muted-foreground">No variables found.</p>
+        {/* New-entry drafts */}
+        {drafts.map((d) => {
+          const keyValid = KEY_RE.test(d.key.trim())
+          const canSave  = keyValid && !d.saving
+
+          return (
+            <div
+              key={d.id}
+              className="p-3 rounded-md border border-accent/30 bg-accent/5 space-y-2"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-accent">
+                  <Plus className="w-3 h-3" />
+                  New Secret
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeDraft(d.id)}
+                  title="Discard draft"
+                  className="flex items-center justify-center w-6 h-6 rounded text-muted-foreground
+                             hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Key input */}
+              <div>
+                <label className="block text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">
+                  Key
+                </label>
+                <input
+                  type="text"
+                  value={d.key}
+                  onChange={(e) => patchDraft(d.id, { key: e.target.value.toUpperCase(), error: null })}
+                  placeholder="MY_API_KEY"
+                  spellCheck={false}
+                  autoComplete="off"
+                  autoFocus
+                  className={`w-full px-3 py-2 text-xs font-mono bg-[#0f0f0f] text-foreground
+                              rounded-md border placeholder:text-muted-foreground/40
+                              focus:outline-none focus:ring-1 transition-colors
+                              ${d.key && !keyValid
+                                ? "border-red-500/50 focus:border-red-400 focus:ring-red-400/40"
+                                : "border-border focus:border-accent focus:ring-accent/40"}`}
+                />
+                {d.key && !keyValid && (
+                  <p className="mt-1 text-[10px] text-red-300/90">
+                    Invalid format — use UPPERCASE letters, digits, and underscores (e.g. <code>MY_API_KEY</code>).
+                  </p>
+                )}
+              </div>
+
+              {/* Value input + actions */}
+              <div>
+                <label className="block text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">
+                  Value
+                </label>
+                <div className="flex items-stretch gap-1.5">
+                  <div className="relative flex-1 min-w-0">
+                    <input
+                      type={d.visible ? "text" : "password"}
+                      value={d.value}
+                      onChange={(e) => patchDraft(d.id, { value: e.target.value, error: null })}
+                      onKeyDown={(e) => {
+                        if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && canSave) saveDraft(d.id)
+                      }}
+                      placeholder="(empty)"
+                      spellCheck={false}
+                      autoComplete="off"
+                      className="w-full pl-3 pr-10 py-2 text-xs font-mono bg-[#0f0f0f] text-foreground
+                                 rounded-md border border-border placeholder:text-muted-foreground/40
+                                 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/40
+                                 transition-colors"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => patchDraft(d.id, { visible: !d.visible })}
+                      title={d.visible ? "Hide value" : "Show value"}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center justify-center
+                                 w-7 h-7 rounded text-muted-foreground hover:text-accent hover:bg-accent/10
+                                 transition-colors"
+                    >
+                      {d.visible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => saveDraft(d.id)}
+                    disabled={!canSave}
+                    title="Save secret"
+                    className="flex items-center gap-1 px-3 text-xs font-medium rounded-md
+                               bg-accent/15 text-accent border border-accent/40
+                               hover:bg-accent/25 hover:border-accent/70
+                               disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-accent/15
+                               transition-all"
+                  >
+                    {d.saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                    <span className="hidden sm:inline">Save</span>
+                  </button>
+                </div>
+              </div>
+
+              {d.error && (
+                <p className="text-[10px] text-red-300/90 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3 flex-shrink-0" />
+                  {d.error}
+                </p>
+              )}
+            </div>
+          )
+        })}
+
+        {!loading && !loadError && order.length === 0 && drafts.length === 0 && (
+          <p className="text-center py-8 text-xs text-muted-foreground">
+            No variables yet. Click <span className="text-accent">+ Add Secret</span> to create one.
+          </p>
         )}
       </div>
 
-      {/* Footer hint */}
+      {/* Footer */}
       <div className="px-4 py-2 border-t border-border bg-card/60 flex-shrink-0">
         <p className="text-[10px] text-muted-foreground">
           Tip: <kbd className="px-1 py-0.5 rounded bg-muted text-[10px] font-mono">⌘/Ctrl + Enter</kbd> saves the focused field.
