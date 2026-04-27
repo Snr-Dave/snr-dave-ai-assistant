@@ -4,7 +4,7 @@ import dynamic from "next/dynamic"
 import { useRef, useState, useCallback } from "react"
 import {
   Terminal as TerminalIcon,
-  Trash2, Copy, Check,
+  Trash2,
   Maximize2, Minimize2,
   ALargeSmall,
   Wifi, WifiOff, Globe, Loader2,
@@ -82,7 +82,6 @@ export function DashboardTerminal({
   onToggleFullHeight,
 }: DashboardTerminalProps) {
   const handleRef  = useRef<TerminalHandle>(null)
-  const [copied,   setCopied]   = useState(false)
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE)
   const [conn, setConn]         = useState<{ status: ConnectionStatus; detail?: string }>({
     status: "connecting",
@@ -107,15 +106,9 @@ export function DashboardTerminal({
     handleRef.current?.setFontSize(next)
   }, [currentIdx])
 
-  // ── Copy / Clear ───────────────────────────────────────────────────────────
+  // ── Clear ──────────────────────────────────────────────────────────────────
   const handleClear = useCallback(() => {
     handleRef.current?.clear()
-  }, [])
-
-  const handleCopy = useCallback(async () => {
-    await handleRef.current?.copySelection()
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
   }, [])
 
   return (
@@ -166,21 +159,6 @@ export function DashboardTerminal({
 
           {/* Divider */}
           <div className="w-px h-4 bg-border mx-1" />
-
-          {/* Copy */}
-          <button
-            type="button"
-            onClick={handleCopy}
-            title="Copy selection"
-            className="flex items-center gap-1 px-2 py-1.5 text-xs rounded-md text-muted-foreground
-                       hover:text-accent hover:bg-accent/10 border border-transparent hover:border-accent/20 transition-all"
-          >
-            {copied
-              ? <Check className="w-3.5 h-3.5 text-green-400" />
-              : <Copy  className="w-3.5 h-3.5" />
-            }
-            <span className="hidden sm:inline">{copied ? "Copied" : "Copy"}</span>
-          </button>
 
           {/* Clear */}
           <button
