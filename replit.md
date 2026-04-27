@@ -4,23 +4,29 @@ Personal AI-powered dashboard with real-time chat, GitHub activity feed, project
 
 ## Architecture
 
-- **Framework**: Next.js 16.2.4 (App Router + Pages Router for Socket.IO, Turbopack)
+- **Framework**: Next.js 16.2.4 (App Router + Pages Router for the WebSocket bridge, Turbopack)
 - **AI**: Vercel AI SDK v6 (`ai@6.0.168`) + `@ai-sdk/google` → Gemini 2.5 Flash
-- **GitHub**: Octokit REST (`@octokit/rest`) for AI agent tools
-- **Terminal**: `xterm.js` + `@xterm/addon-fit` on the client, `socket.io` + `child_process.spawn('/bin/bash', ['-i'])` on the server
+- **GitHub**: Octokit REST (`@octokit/rest`) for AI agent tools + `gh` CLI (Nix `gh` 2.72) auto-authenticated via injected `GH_TOKEN`/`GITHUB_TOKEN`
+- **Terminal — Universal Shell (hybrid)**:
+  - Client: `xterm.js` + `@xterm/addon-fit`, owns its own line editor (history, arrows, Ctrl-C/L/U)
+  - Transport: Socket.IO (WebSocket) when available, automatic HTTP POST fallback for serverless hosts (Vercel, StackBlitz)
+  - Server: shared `lib/exec-shell.ts` — per-command `bash -c`, persistent CWD via wrapper marker, `GH_TOKEN`/`GITHUB_TOKEN` injected for every command
+  - Status badge in the header shows the active transport (green “WebSocket” / amber “HTTP”)
 - **Styling**: Tailwind CSS v4 — Deep Charcoal (`#0a0a0a` / `#0f0f0f`) + Electric Cyan (`#00d9ff`)
 - **Data fetching**: SWR for client-side GitHub data
-- **Port**: 5000 (`next dev -p 5000 -H 0.0.0.0`)
+- **Notifications**: Module-scoped pub/sub (`lib/notifications.ts`) bridged into React via `useSyncExternalStore`. Bell icon in `dashboard-header.tsx` shows unread count + dropdown panel; terminal exit codes, AI / GitHub / API status flips, and signal interrupts all push events
+- **Port**: 5000 on Replit (`next dev -p 5000 -H 0.0.0.0`); StackBlitz uses `npm run dev:stackblitz` (Next.js default port) via `.stackblitzrc`
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `app/api/chat/route.ts` | AI chat endpoint — Gemini + 9 GitHub tools + shell-bridge prompt |
+| `app/api/chat/route.ts` | AI chat endpoint — Gemini + 9 GitHub tools + Universal Shell prompt; `executeBash` delegates to `lib/exec-shell.ts` |
 | `app/api/github/events/route.ts` | Proxies GitHub events API with `GITHUB_TOKEN` |
 | `app/api/github/repos/route.ts` | Proxies GitHub repos API with `GITHUB_TOKEN` |
+| `app/api/terminal/exec/route.ts` | **Universal Shell HTTP executor** — `POST { command, cwd?, timeoutMs? }` → JSON `{ stdout, stderr, exitCode, signal, cwd, durationMs, truncated }`. Used by the Hybrid Terminal's HTTP fallback and as a structured exec surface for the AI |
 | `app/layout.tsx` | Root layout — imports `@xterm/xterm/css/xterm.css` (Turbopack-safe location) |
-| `pages/api/terminal/shell.ts` | Lazy Socket.IO server at `/api/terminal/socket.io`; spawns bash, pipes stdio, SIGHUP on disconnect |
+| `pages/api/terminal/shell.ts` | **Universal Shell WebSocket bridge** — Socket.IO at `/api/terminal/socket.io`. Per-command protocol: client `exec`/`cancel` → server `output`/`done` + `broadcast` relay |
 | `pages/api/settings/env.ts` | `GET` / `PUT` for `.env` with format-preserving upsert + key validation |
 | `components/chat-window.tsx` | AI chat UI; AI SDK v6 tool detection (`tool-{name}` parts) |
 | `components/system-status.tsx` | Live status bar for API / AI / GitHub health |
@@ -28,20 +34,99 @@ Personal AI-powered dashboard with real-time chat, GitHub activity feed, project
 | `components/projects-grid.tsx` | Live GitHub repositories grid |
 | `components/dashboard-header.tsx` | Top bar; opens `SettingsPanel` and owns `activeTab` state (`TabId`) |
 | `components/settings-panel.tsx` | Right slide-over with **System Console** + **Environment** tabs; owns full-height state |
-| `components/dashboard-terminal.tsx` | Terminal header — font-size A−/A+ (10–20), Copy, Clear, Full-Height toggle |
-| `components/xterm-core.tsx` | xterm.js + Socket.IO client; `forwardRef` exposes `clear` / `copySelection` / `setFontSize` |
+| `components/dashboard-terminal.tsx` | Universal Shell chrome — title, **connection status badge** (`WebSocket`/`HTTP`/`Connecting`), font-size A−/A+, Copy, Clear, Full-Height toggle. Hosts `<Terminal />`. |
+| `components/terminal.tsx` | **Hybrid xterm client** — owns the line editor + history. Probes WS first, falls back to HTTP POST. Exposes `TerminalHandle` (`clear`/`copySelection`/`setFontSize`) via `forwardRef`; reports transport via `onStatusChange` |
 | `components/environment-manager.tsx` | `.env` editor — masked rows, eye toggle, `+ Add Secret` drafts with key validation |
-| `lib/shell-tool.ts` | AI Shell Bridge Phase 1 — `formatBashExec`, `parseBashExec`, `SHELL_PROMPT_FRAGMENT` |
+| `components/notifications-panel.tsx` | Bell-icon dropdown — lists notifications with level icons, dedupes, click-outside / ESC to close, marks unread on open |
+| `lib/notifications.ts` | Notification store — module pub/sub + `useSyncExternalStore` hook, dedupe keys, MAX 50 items, `notify()` / `markAllRead` / `dismiss` / `clearAll` |
+| `lib/exec-shell.ts` | **Single source of truth for command execution.** `execShell(cmd, opts)` injects `GH_TOKEN`/`GITHUB_TOKEN`, wraps the command so the resolved `pwd` is reported back (persistent `cd` across calls), streams cleaned stdout/stderr through callbacks, supports `AbortSignal` cancellation and timeouts |
+| `lib/terminal-bus.ts` | Singleton bus around the live Socket.IO server — `broadcastConsole(event)` mirrors AI- and HTTP-initiated commands to every connected WS terminal |
+| `lib/shell-tool.ts` | `formatBashExec`, `parseBashExec`, `SHELL_PROMPT_FRAGMENT` (Universal Shell guidance for the LLM) |
 | `next.config.ts` | `allowedDevOrigins` for Replit HMR support |
 
-## Environment Secrets
+## System Architecture
 
-| Secret | Purpose |
-|--------|---------|
-| `GOOGLE_API_KEY` | Google AI Studio key for Gemini 2.5 Flash |
-| `GITHUB_TOKEN` | GitHub PAT for authenticated API calls and AI agent tools |
+The Universal Shell uses a hybrid transport with graceful HTTP fallback. Both
+paths share the same `lib/exec-shell.ts` executor, so behaviour (env
+injection, persistent CWD, output cleaning, abort + timeout) is identical
+regardless of how the command is delivered.
 
-Replit secrets take precedence over `.env`. The Settings → Environment tab manages `.env` only — for Replit-injected secrets use the Replit Secrets panel.
+```
+                    ┌──────────────────────────────────────┐
+                    │  Browser  ·  components/terminal.tsx │
+                    │  xterm.js + custom line editor       │
+                    └─────────────┬────────────────────────┘
+                                  │
+                                  ▼
+                ┌──────────────── probe ────────────────┐
+                │  Try Socket.IO upgrade @ /api/        │
+                │       terminal/socket.io              │
+                │  (timeout 4s, badge: amber → green)   │
+                └────────┬────────────────┬─────────────┘
+                         │ ok             │ blocked / timeout
+                         ▼                ▼
+   ┌────────────────────────────┐   ┌──────────────────────────────┐
+   │  WebSocket  (low latency)  │   │  HTTP POST  (universal)      │
+   │  pages/api/terminal/       │   │  app/api/terminal/exec/      │
+   │       shell.ts             │   │       route.ts               │
+   │  emit "exec" / "cancel"    │   │  body: {command, cwd, ...}   │
+   │  recv "output" / "done"    │   │  resp: {stdout, stderr,      │
+   │                            │   │         exitCode, signal,    │
+   │                            │   │         cwd, durationMs,     │
+   │                            │   │         truncated}           │
+   └────────────┬───────────────┘   └────────────┬─────────────────┘
+                │                                │
+                └────────────────┬───────────────┘
+                                 ▼
+                ┌──────────────────────────────────┐
+                │  lib/exec-shell.ts · execShell() │
+                │   • injects GH_TOKEN/GITHUB_TOKEN│
+                │   • wraps cmd w/ \x1f marker     │
+                │     for persistent CWD report    │
+                │   • streams + cleans stdout/err  │
+                │   • AbortSignal + timeout        │
+                └──────────────────┬───────────────┘
+                                   ▼
+                       /bin/bash -c <wrapped cmd>
+                                   │
+                                   ▼
+                ┌──────────────────────────────────┐
+                │  lib/terminal-bus.ts             │
+                │  broadcastConsole(event) →       │
+                │    every connected WS client     │
+                │    (mirrors AI + HTTP exec)      │
+                └──────────────────┬───────────────┘
+                                   ▼
+                ┌──────────────────────────────────┐
+                │  lib/notifications.ts            │
+                │  notify({level, source, ...})    │
+                │   ← exit codes, signals,         │
+                │     status flips, AI errors      │
+                │  → bell badge in dashboard       │
+                │     header                       │
+                └──────────────────────────────────┘
+```
+
+Health probes from `components/system-status.tsx` poll `/api/chat`,
+`/api/github/events` every 60 s. Real transitions (online ↔ offline) are
+forwarded to `notify()` with a `dedupeKey` so a flapping endpoint never
+spams the bell.
+
+## Setup Guide
+
+Required keys checked at runtime. Set them as **Replit Secrets** in
+production and copy `.env.example` → `.env` for local / StackBlitz dev.
+Replit Secrets take precedence over `.env`; the in-app **Settings →
+Environment** tab edits `.env` only.
+
+| Key | Required? | Source | Used By | Notes |
+|-----|-----------|--------|---------|-------|
+| `GOOGLE_API_KEY` | **Yes** | Replit Secret · `.env` | `app/api/chat/route.ts` | Gemini 2.5 Flash via `@ai-sdk/google`. Get one at <https://aistudio.google.com/apikey>. |
+| `GITHUB_TOKEN` | **Yes** | Replit Secret · `.env` | `app/api/chat/route.ts`, `app/api/github/*/route.ts`, `lib/exec-shell.ts` | Fine-grained PAT with `repo` + `workflow` scopes. Powers Octokit + the `gh` CLI inside the Universal Shell. |
+| `GH_TOKEN` | Auto-derived | n/a — injected by `lib/exec-shell.ts` | every shell command | Mirrored from `GITHUB_TOKEN` for tools that read `GH_*` (e.g. `gh` CLI). Do not set manually. |
+| `REPLIT_DEV_DOMAIN` | Auto (Replit) | Replit runtime | `next.config.ts` | Added to `allowedDevOrigins` so the proxied preview iframe loads. Leave unset locally. |
+| `NEXT_PUBLIC_BASE_URL` | Optional | `.env` | reserved | Override only when serving the API from a different origin than the dashboard. The terminal client uses relative URLs by default — works in StackBlitz WebContainers and Replit previews unchanged. |
+| `NEXT_TELEMETRY_DISABLED` | Optional | `.stackblitzrc` env | Next.js | Set to `1` in StackBlitz to silence the telemetry banner during cold-boot.
 
 ## AI GitHub Agent Tools (DevOps & Security Specialist)
 

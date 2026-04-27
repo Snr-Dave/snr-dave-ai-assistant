@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Activity, Cpu, HardDrive, Wifi, RefreshCw } from "lucide-react"
+import { notify } from "@/lib/notifications"
 
 type ConnectionStatus = "online" | "checking" | "offline"
 
@@ -61,6 +62,19 @@ export function SystemStatus() {
   })
   const [lastChecked, setLastChecked] = useState<Date | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  // Track previous status so we only fire notifications on actual transitions
+  // (online → offline, offline → online) rather than every poll cycle.
+  const prevStatusRef = useRef<StatusState | null>(null)
+
+  useEffect(() => {
+    const prev = prevStatusRef.current
+    if (prev) {
+      announceTransition("API Gateway", "api", prev.api, status.api)
+      announceTransition("AI Model",    "ai",  prev.ai,  status.ai)
+      announceTransition("GitHub API",  "github", prev.github, status.github)
+    }
+    prevStatusRef.current = status
+  }, [status])
 
   const checkStatus = async () => {
     await Promise.resolve() // Defer state updates out of the synchronous effect body
@@ -106,7 +120,55 @@ export function SystemStatus() {
     return () => clearInterval(interval)
   }, [])
 
-  const allOnline = Object.values(status).every((s) => s === "online")
+  return (
+    <SystemStatusView
+      status={status}
+      lastChecked={lastChecked}
+      isRefreshing={isRefreshing}
+      onRefresh={checkStatus}
+    />
+  )
+}
+
+function announceTransition(
+  label: string,
+  key:   "api" | "ai" | "github",
+  prev:  ConnectionStatus,
+  next:  ConnectionStatus,
+) {
+  if (prev === next) return
+  // Don't notify on the initial "checking" → online/offline; only on real flips
+  // between known states (online ↔ offline).
+  if (prev === "checking" || next === "checking") return
+
+  if (next === "offline") {
+    notify({
+      level:     "error",
+      source:    key === "ai" ? "ai" : key === "github" ? "github" : "system",
+      title:     `${label} is offline`,
+      message:   "Health probe failed — see system status panel for details.",
+      dedupeKey: `status:${key}`,
+    })
+  } else if (next === "online") {
+    notify({
+      level:     "success",
+      source:    key === "ai" ? "ai" : key === "github" ? "github" : "system",
+      title:     `${label} recovered`,
+      message:   "Connectivity restored.",
+      dedupeKey: `status:${key}`,
+    })
+  }
+}
+
+interface SystemStatusViewProps {
+  status:       StatusState
+  lastChecked:  Date | null
+  isRefreshing: boolean
+  onRefresh:    () => void | Promise<void>
+}
+
+function SystemStatusView({ status, lastChecked, isRefreshing, onRefresh }: SystemStatusViewProps) {
+  const allOnline  = Object.values(status).every((s) => s === "online")
   const hasOffline = Object.values(status).some((s) => s === "offline")
 
   return (
@@ -123,7 +185,7 @@ export function SystemStatus() {
           </p>
         </div>
         <button
-          onClick={checkStatus}
+          onClick={() => void onRefresh()}
           disabled={isRefreshing}
           className="ml-auto p-2 rounded-lg hover:bg-muted transition-colors disabled:opacity-50"
           aria-label="Refresh status"

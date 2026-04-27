@@ -52,29 +52,41 @@ export function hasBashExec(text: string): boolean {
 }
 
 /**
- * Canonical prompt fragment teaching the LLM how to use the System Console.
+ * Canonical prompt fragment teaching the LLM how to use the Universal Shell.
  * Append this to any system prompt that should be shell-aware.
  */
 export const SHELL_PROMPT_FRAGMENT = `
-## System Console (live bash shell)
+## Universal Shell (cross-repo bash + gh CLI)
 
-The user has a live, interactive bash shell available in the dashboard's
-Settings → System Console panel. It runs in the project workspace
-(\`/home/runner/workspace\`) and shares the same filesystem as the app.
+The user has a **Universal Shell** in the dashboard (Settings → System Console).
+It runs as the same process as the app, so the workspace filesystem is
+shared and persistent. The dashboard frontend uses WebSockets when available
+and automatically falls back to HTTP POST on serverless hosts.
 
-**You can execute commands directly via the \`executeBash\` tool.** Output
-streams live to the user's System Console (so they watch the work happen) and
-the captured stdout/stderr come back as the tool result so you can verify
-what happened and decide next steps.
+**You execute commands via the \`executeBash\` tool.** Output streams live to
+the user's terminal AND comes back to you as structured \`stdout\`/\`stderr\`/
+\`exitCode\` so you can verify what happened and decide next steps.
 
-When you intend to show the command before running it (for explanation or
+GitHub authentication is wired in for every command: \`GH_TOKEN\` and
+\`GITHUB_TOKEN\` are pre-exported, so both \`git\` and the \`gh\` CLI work
+against any Snr-Dave repository immediately — no \`gh auth login\` step.
+
+Use it for cross-repo work:
+- \`gh repo view Snr-Dave/<repo>\`, \`gh issue list -R Snr-Dave/<repo>\`,
+  \`gh pr create\`, \`gh release list\`, etc.
+- For deeper changes (read-many-files, run tests, edit code), clone into
+  \`/tmp\` and work there:
+  \`git clone https://github.com/Snr-Dave/<repo>.git /tmp/<repo> && cd /tmp/<repo>\`.
+  Always use \`/tmp\` for foreign repos so the dashboard workspace stays clean.
+
+When you intend to **show** a command before running it (for explanation /
 confirmation), wrap it in a fenced code block tagged \`bash-exec\`. Plain
-\`bash\` blocks are treated as read-only examples.
+\`bash\` blocks are read-only examples.
 
 Rules:
 - One logical command per \`executeBash\` call (chain with \`&&\` or \`;\` if needed).
 - For destructive commands (\`rm -rf\`, \`git reset --hard\`, \`git push --force\`,
-  \`DROP TABLE\`, etc.), first explain the impact in prose, ask the user to
+  \`DROP TABLE\`, etc.) first explain the impact in prose, ask the user to
   confirm, and only call \`executeBash\` after they agree.
 - Prefer non-interactive flags (\`--yes\`, \`--non-interactive\`, \`-y\`) — there
   is no human at the prompt during execution.
@@ -82,12 +94,14 @@ Rules:
   short-lived alternatives (\`npm run build\` rather than \`npm run dev\`).
 - After execution, check \`exitCode\` and \`stderr\` and report the outcome
   honestly — do not claim success on a non-zero exit.
+- The shell preserves working directory across calls; once you \`cd /tmp/foo\`,
+  the next \`executeBash\` resumes there.
 
 Example narration:
 
 \`\`\`bash-exec
-git status --short
+gh repo view Snr-Dave/example --json description,pushedAt
 \`\`\`
 
-…then call \`executeBash({ command: "git status --short" })\`.
+…then call \`executeBash({ command: "gh repo view Snr-Dave/example --json description,pushedAt" })\`.
 `.trim()

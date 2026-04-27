@@ -3,6 +3,8 @@
 import { useState, useCallback } from "react"
 import { Terminal, Settings, Bell } from "lucide-react"
 import { SettingsPanel, type TabId } from "./settings-panel"
+import { NotificationsPanel } from "./notifications-panel"
+import { useUnreadCount } from "@/lib/notifications"
 
 function GitHubIcon({ className }: { className?: string }) {
   return (
@@ -13,11 +15,15 @@ function GitHubIcon({ className }: { className?: string }) {
 }
 
 export function DashboardHeader() {
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [activeTab, setActiveTab]       = useState<TabId>("console")
+  const [settingsOpen, setSettingsOpen]           = useState(false)
+  const [activeTab, setActiveTab]                 = useState<TabId>("console")
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const unread = useUnreadCount()
 
-  const openSettings  = useCallback(() => setSettingsOpen(true),  [])
-  const closeSettings = useCallback(() => setSettingsOpen(false), [])
+  const openSettings        = useCallback(() => setSettingsOpen(true),  [])
+  const closeSettings       = useCallback(() => setSettingsOpen(false), [])
+  const toggleNotifications = useCallback(() => setNotificationsOpen((v) => !v), [])
+  const closeNotifications  = useCallback(() => setNotificationsOpen(false), [])
 
   return (
     <>
@@ -44,14 +50,31 @@ export function DashboardHeader() {
           >
             <GitHubIcon className="w-5 h-5" />
           </a>
-          <button
-            type="button"
-            className="flex items-center justify-center w-9 h-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors relative"
-            aria-label="Notifications"
-          >
-            <Bell className="w-5 h-5" />
-            <span className="absolute top-2 right-2 w-2 h-2 bg-accent rounded-full" />
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={toggleNotifications}
+              aria-label="Notifications"
+              aria-expanded={notificationsOpen}
+              aria-haspopup="dialog"
+              className={`flex items-center justify-center w-9 h-9 rounded-lg transition-colors relative ${
+                notificationsOpen
+                  ? "bg-muted text-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+              }`}
+            >
+              <Bell className="w-5 h-5" />
+              {unread > 0 && (
+                <span
+                  className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center text-[10px] font-bold leading-none bg-accent text-accent-foreground rounded-full"
+                  aria-label={`${unread} unread notifications`}
+                >
+                  {unread > 9 ? "9+" : unread}
+                </span>
+              )}
+            </button>
+            <NotificationsPanel open={notificationsOpen} onClose={closeNotifications} />
+          </div>
           <button
             type="button"
             onClick={openSettings}
