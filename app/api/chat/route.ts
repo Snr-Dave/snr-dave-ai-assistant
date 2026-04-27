@@ -1,10 +1,10 @@
 import { streamText, convertToModelMessages, tool, jsonSchema } from "ai"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { Octokit } from "@octokit/rest"
-import { spawn } from "node:child_process"
 import _sodium from "libsodium-wrappers"
 import { SHELL_PROMPT_FRAGMENT } from "@/lib/shell-tool"
-import { broadcastToConsole } from "@/lib/terminal-bus"
+import { broadcastConsole } from "@/lib/terminal-bus"
+import { execShell, DEFAULT_TIMEOUT, MAX_TIMEOUT } from "@/lib/exec-shell"
 
 const google = createGoogleGenerativeAI({
   apiKey: process.env.GOOGLE_API_KEY,
@@ -48,95 +48,47 @@ interface ExecuteBashOutput {
 }
 
 // ── executeBash helpers ──────────────────────────────────────────────────────
+//
+// The actual command executor lives in `lib/exec-shell.ts` so the AI tool, the
+// HTTP `/api/terminal/exec` route, and the WebSocket bridge all share the same
+// implementation (incl. GH_TOKEN / GITHUB_TOKEN injection and CWD persistence).
+// Here we just wrap it to mirror output to live consoles via the broadcast bus.
 
-const WORKSPACE_CWD     = "/home/runner/workspace"
-const MAX_OUTPUT_BYTES  = 32 * 1024     // 32 KB per stream returned to the LLM
-const DEFAULT_TIMEOUT   = 30_000        // 30 s
-const MAX_TIMEOUT       = 120_000       // 2 min hard cap
+const AI_OUTPUT_LIMIT = 32 * 1024 // bytes returned to the LLM per stream
 
-/** ANSI: cyan banner used to mark AI-initiated executions in the live console. */
-const consoleBanner = (cmd: string) =>
-  `\r\n\x1b[36m\x1b[1m[AI]\x1b[0m \x1b[2m$ ${cmd.replace(/\r?\n/g, " ⏎ ")}\x1b[0m\r\n`
+async function runBashForAI(command: string, timeoutMs: number): Promise<ExecuteBashOutput> {
+  const streamedToConsole = broadcastConsole({ type: "ai-banner", command })
 
-const consoleFooter = (code: number | null, signal: string | null, ms: number) => {
-  const status = signal
-    ? `\x1b[33msignal=${signal}\x1b[0m`
-    : code === 0
-      ? `\x1b[32mexit=0\x1b[0m`
-      : `\x1b[31mexit=${code}\x1b[0m`
-  return `\x1b[2m[AI] ${status} (${ms}ms)\x1b[0m\r\n`
-}
-
-/**
- * Spawn a shell command in /home/runner/workspace, mirror its output to the
- * live System Console (if open), capture up to MAX_OUTPUT_BYTES per stream,
- * and resolve with a structured summary for the LLM.
- */
-function runBash(command: string, timeoutMs: number): Promise<ExecuteBashOutput> {
-  return new Promise((resolve) => {
-    const start  = Date.now()
-    const child  = spawn("/bin/bash", ["-c", command], {
-      cwd: WORKSPACE_CWD,
-      env: { ...process.env, TERM: "xterm-256color" },
-    })
-
-    let stdoutBuf = ""
-    let stderrBuf = ""
-    let truncated = false
-
-    const streamedToConsole = broadcastToConsole(consoleBanner(command))
-
-    const append = (buf: string, chunk: string): string => {
-      if (buf.length >= MAX_OUTPUT_BYTES) { truncated = true; return buf }
-      const room = MAX_OUTPUT_BYTES - buf.length
-      if (chunk.length > room) {
-        truncated = true
-        return buf + chunk.slice(0, room) + "\n…[truncated]"
-      }
-      return buf + chunk
-    }
-
-    child.stdout.on("data", (b: Buffer) => {
-      const s = b.toString("utf-8")
-      stdoutBuf = append(stdoutBuf, s)
-      // Convert LF → CRLF so xterm renders cleanly without raw-mode TTY
-      broadcastToConsole(s.replace(/\n/g, "\r\n"))
-    })
-    child.stderr.on("data", (b: Buffer) => {
-      const s = b.toString("utf-8")
-      stderrBuf = append(stderrBuf, s)
-      broadcastToConsole(`\x1b[31m${s.replace(/\n/g, "\r\n")}\x1b[0m`)
-    })
-
-    const timer = setTimeout(() => {
-      try { child.kill("SIGTERM") } catch { /* ignore */ }
-      // Hard kill if still alive after grace period
-      setTimeout(() => { try { child.kill("SIGKILL") } catch { /* ignore */ } }, 2_000)
-    }, timeoutMs)
-
-    child.on("error", (err) => {
-      clearTimeout(timer)
-      const ms = Date.now() - start
-      broadcastToConsole(`\x1b[31m[AI] spawn error: ${err.message}\x1b[0m\r\n`)
-      resolve({
-        command, exitCode: null, signal: null,
-        stdout: stdoutBuf,
-        stderr: (stderrBuf ? stderrBuf + "\n" : "") + `spawn error: ${err.message}`,
-        durationMs: ms, truncated, streamedToConsole,
-      })
-    })
-
-    child.on("exit", (code, signal) => {
-      clearTimeout(timer)
-      const ms = Date.now() - start
-      broadcastToConsole(consoleFooter(code, signal, ms))
-      resolve({
-        command, exitCode: code, signal,
-        stdout: stdoutBuf, stderr: stderrBuf,
-        durationMs: ms, truncated, streamedToConsole,
-      })
-    })
+  const result = await execShell(command, {
+    timeoutMs,
+    onStdout: (chunk) => broadcastConsole({ type: "stdout", data: chunk }),
+    onStderr: (chunk) => broadcastConsole({ type: "stderr", data: chunk }),
   })
+
+  broadcastConsole({
+    type:       "ai-footer",
+    exitCode:   result.exitCode,
+    signal:     result.signal,
+    durationMs: result.durationMs,
+  })
+
+  // Cap the buffers we return to the model so a noisy command doesn't blow
+  // the context window — terminal users still see the full stream.
+  const cap = (s: string) =>
+    s.length > AI_OUTPUT_LIMIT
+      ? s.slice(0, AI_OUTPUT_LIMIT) + "\n…[truncated]"
+      : s
+
+  return {
+    command:           result.command,
+    exitCode:          result.exitCode,
+    signal:            result.signal,
+    stdout:            cap(result.stdout),
+    stderr:            cap(result.stderr),
+    durationMs:        result.durationMs,
+    truncated:         result.truncated || result.stdout.length > AI_OUTPUT_LIMIT || result.stderr.length > AI_OUTPUT_LIMIT,
+    streamedToConsole,
+  }
 }
 
 // ─── Tools ─────────────────────────────────────────────────────────────────────
@@ -447,11 +399,13 @@ const githubTools = {
 
   executeBash: tool<ExecuteBashInput, ExecuteBashOutput | { error: string }>({
     description:
-      "Execute a shell command in the user's workspace (/home/runner/workspace). " +
-      "Output streams LIVE to the user's System Console (Settings → System Console) so they can watch the work happen, " +
-      "and the captured stdout/stderr are returned to you so you can verify the result. " +
-      "Use this for git operations, running tests, package installs, file inspection, build commands, etc. " +
-      "DESTRUCTIVE COMMANDS (rm -rf, git reset --hard, force-push, DROP TABLE, etc.) — explain the impact and ASK FOR CONFIRMATION before calling this tool.",
+      "Universal Shell — execute any shell command. GH_TOKEN and GITHUB_TOKEN are pre-set so " +
+      "`git` and the `gh` CLI authenticate against every Snr-Dave repository out of the box. " +
+      "Output streams LIVE to the user's Universal Shell (Settings → System Console) so they can watch, " +
+      "and the captured stdout/stderr/exitCode are returned for you to verify. " +
+      "Use this for git/gh operations, cloning ANY Snr-Dave repo to /tmp for inspection or fixes, running tests, " +
+      "package installs, file inspection, build commands, etc. " +
+      "DESTRUCTIVE COMMANDS (rm -rf, git reset --hard, force-push, DROP TABLE, etc.) — explain the impact and ASK FOR CONFIRMATION first.",
     inputSchema: jsonSchema<ExecuteBashInput>({
       type: "object",
       properties: {
@@ -465,7 +419,7 @@ const githubTools = {
       if (!cmd) return { error: "Command must be a non-empty string." }
       const t = Math.min(Math.max(typeof timeoutMs === "number" ? timeoutMs : DEFAULT_TIMEOUT, 1000), MAX_TIMEOUT)
       try {
-        return await runBash(cmd, t)
+        return await runBashForAI(cmd, t)
       } catch (err: unknown) {
         return { error: `executeBash failed: ${err instanceof Error ? err.message : String(err)}` }
       }
@@ -537,8 +491,17 @@ export async function POST(req: Request) {
 
 ## Tools you have
 
-- **executeBash** — run any shell command in \`/home/runner/workspace\`. Output streams live to the System Console AND is returned to you.
-- **GitHub repo tools** — read files, commit, branch, manage settings, write Actions secrets (write-only by design), edit \`.github/workflows/\` YAML, open/merge PRs, merge branches.
+You now have a **Universal Shell**. You can manage any GitHub repo using the \`gh\` CLI.
+To fix bugs or summarize other repos, clone them to \`/tmp\` and use your shell tools.
+
+- **executeBash** — your **Universal Shell**. Runs any command; output streams live to the user's terminal and the captured \`stdout\`/\`stderr\`/\`exitCode\` come back to you.
+  - \`GH_TOKEN\` and \`GITHUB_TOKEN\` are **already exported** for every command, so \`git\` and the \`gh\` CLI authenticate against any Snr-Dave repository out of the box — no setup, no \`gh auth login\`.
+  - Manage **any** Snr-Dave repo via \`gh\` directly: \`gh repo view Snr-Dave/<repo>\`, \`gh issue list -R Snr-Dave/<repo>\`, \`gh pr create\`, \`gh release list\`, etc.
+  - To fix bugs in or summarise **other repos**, clone them to \`/tmp\` and operate there:
+    \`git clone https://github.com/Snr-Dave/<repo>.git /tmp/<repo> && cd /tmp/<repo> && cat README.md\`.
+    Always work from \`/tmp\` for foreign repos so the dashboard workspace stays clean.
+  - The shell preserves working directory across calls — once you \`cd /tmp/foo\`, the next \`executeBash\` resumes there.
+- **GitHub repo tools** (Octokit shortcuts) — read files, commit, branch, manage settings, write Actions secrets (write-only by design), edit \`.github/workflows/\` YAML, open/merge PRs, merge branches. Prefer these for clean structured edits; reach for \`executeBash\` + \`gh\`/\`git\` whenever you need anything they don't cover.
 
 ## Mandatory: summarise every executeBash result
 
