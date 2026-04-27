@@ -175,14 +175,19 @@ snr-dave-ai-assistant/
 
 ## 🔐 Environment Variables
 
-Configure these as **Replit Secrets** (or `.env.local` for local dev):
+Configure these as **Replit Secrets** (or `.env.local` for local dev). The
+table below reflects the **live audit on the `terminal-f` branch** —
+status was cross-checked against the Replit secret store.
 
-| Secret | Required | Purpose |
-|--------|----------|---------|
-| `GOOGLE_API_KEY` | ✅ Yes | Google AI Studio key — powers Gemini 2.5 Flash |
-| `GITHUB_TOKEN` | ✅ Yes | GitHub PAT — authenticated API calls + AI agent tools |
+| Variable | Required | Purpose | Status (terminal-f) |
+|----------|----------|---------|---------------------|
+| `GOOGLE_API_KEY` | ✅ Yes | Google AI Studio key — powers Gemini 2.5 Flash chat (`app/api/chat/route.ts`) | ❌ **Missing** — chat will 500 until set |
+| `GITHUB_TOKEN` | ✅ Yes | GitHub PAT — Octokit + AI agent tools + injected into every shell spawn | ✅ Found in Secrets (active as `Snr-Dave` per `gh auth status`) |
+| `GH_TOKEN` | ⚪ Auto | Mirrored from `GITHUB_TOKEN` by `lib/exec-shell.ts` for the `gh` CLI — do not set manually | ⚪ Not required — covered by `GITHUB_TOKEN` |
+| `REPLIT_DEV_DOMAIN` | ⚪ Auto | Replit runtime; appended to Next.js `allowedDevOrigins` so the proxied preview iframe loads | ✅ Found (runtime-managed) |
+| `HOME` | ⚪ Auto | Resolved by the xterm client for cwd display fallback | ✅ Found (system) |
 
-> Both secrets are used **server-side only** — never exposed to the browser.
+> All secrets are used **server-side only** — never exposed to the browser.
 
 ### Adding secrets at runtime
 
@@ -225,6 +230,29 @@ cp .env.example .env.local
 npm run dev
 # → http://localhost:5000
 ```
+
+### Run on Replit
+
+This repo is wired for Replit out-of-the-box. The `.replit` manifest
+declares Node 20, the `web` + `nix` modules, and a `Start application`
+workflow that runs `npm run dev` and waits for port 5000 (mapped to
+external port 80). `replit.nix` adds the `gh` CLI so the AI's shell
+tools have GitHub access on first boot.
+
+```bash
+# 1. After cloning into a Repl
+npm install
+
+# 2. Add secrets via the Secrets pane (or Settings → Environment in-app)
+#    GOOGLE_API_KEY  — required for Gemini chat
+#    GITHUB_TOKEN    — required for Octokit + agent tools + gh CLI
+
+# 3. Run the "Start application" workflow
+#    The dashboard appears at $REPLIT_DEV_DOMAIN on port 5000
+```
+
+`gh auth status` should report **Logged in as `Snr-Dave`** once
+`GITHUB_TOKEN` is in the secret store — the CLI auto-picks it up.
 
 ---
 
@@ -317,6 +345,9 @@ Lazy-initialises a Socket.IO server at `path: /api/terminal/socket.io`. Each cli
 | v1.8 | Added Settings panel with embedded **System Console** (xterm + Socket.IO bash bridge) |
 | v1.9 | Added **Environment Manager** with masked editing, validated `+ Add Secret`, `.env` round-trip |
 | v2.0 | AI Shell Bridge Phase 1 — `lib/shell-tool.ts` + `bash-exec` prompt fragment |
+| v2.1 (`terminal-f`) | **Universal Shell** — hybrid Socket.IO + HTTP fallback, shared `lib/exec-shell.ts` executor, `terminal-bus` broadcasts AI/HTTP commands to live WS clients, in-terminal connection-status badge |
+| v2.2 (`terminal-f`) | **Notification System** — module pub/sub via `useSyncExternalStore`, header bell with unread badge + dropdown, dedupes flapping events; producers across terminal exits, signals, AI/GitHub/API status flips |
+| v2.3 (`terminal-f`) | **Glassmorphism polish** — `backdrop-blur` on header, settings overlay, and chat composer; environment audit + Replit-native bootstrap docs |
 
 ---
 
