@@ -17,6 +17,7 @@ import {
   useEffect, useRef, forwardRef, useImperativeHandle, useState, useCallback,
 } from "react"
 import type { Socket } from "socket.io-client"
+import { notify } from "@/lib/notifications"
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -79,6 +80,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const historyIdxRef   = useRef<number>(-1)
   const draftRef        = useRef<string>("")
   const runningIdRef    = useRef<string | null>(null)
+  const runningCmdRef   = useRef<string>("")
   const httpAbortRef    = useRef<AbortController | null>(null)
 
   const [status, setStatus] = useState<ConnectionStatus>("connecting")
@@ -353,6 +355,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       const tail = truncated ? ` ${YELLOW}(output truncated)${RESET}` : ""
       write(`\r\n${DIM}${code}  ${durationMs}ms${tail}${RESET}`)
       writePrompt()
+
+      // Surface the result in the dashboard notifications panel.
+      const cmd = runningCmdRef.current
+      runningCmdRef.current = ""
+      if (cmd) pushTerminalNotification(cmd, exitCode, signal, durationMs)
     }
 
     // ── Line editor ────────────────────────────────────────────────────────
@@ -515,6 +522,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       if (hist[hist.length - 1] !== command) hist.push(command)
       if (hist.length > 500) hist.shift()
 
+      runningCmdRef.current = command
       void runCommand(command)
     }
 
@@ -609,3 +617,51 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     </div>
   )
 })
+
+// ── Notification helpers (module-scoped so they survive remounts) ─────────────
+
+function previewCmd(cmd: string, max = 60): string {
+  const oneLine = cmd.replace(/\s+/g, " ").trim()
+  return oneLine.length > max ? oneLine.slice(0, max - 1) + "…" : oneLine
+}
+
+function pushTerminalNotification(
+  cmd:        string,
+  exitCode:   number | null,
+  signal:     string | null,
+  durationMs: number,
+) {
+  // Don't spam the bell with every successful one-liner; only success worth
+  // surfacing is a long-running command. Always surface failures + signals.
+  const head = previewCmd(cmd)
+  const time = `${durationMs}ms`
+
+  if (signal) {
+    notify({
+      level:   "warn",
+      source:  "terminal",
+      title:   `Command interrupted (${signal})`,
+      message: `$ ${head}  ·  ${time}`,
+    })
+    return
+  }
+
+  if (exitCode === 0) {
+    if (durationMs >= 5_000) {
+      notify({
+        level:   "success",
+        source:  "terminal",
+        title:   "Long-running command finished",
+        message: `$ ${head}  ·  ${time}`,
+      })
+    }
+    return
+  }
+
+  notify({
+    level:   "error",
+    source:  "terminal",
+    title:   `Command failed (exit ${exitCode ?? "?"})`,
+    message: `$ ${head}  ·  ${time}`,
+  })
+}

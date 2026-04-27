@@ -17,7 +17,8 @@
  *     CWD-marker stripped out** so terminals only see real command output.
  */
 
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
+import { spawn, type ChildProcessByStdio } from "node:child_process"
+import type { Readable } from "node:stream"
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -197,7 +198,7 @@ export function execShell(command: string, opts: ExecOptions = {}): Promise<Exec
     }
 
     const wrapped = wrapCommand(trimmed, cwd)
-    let child: ChildProcessWithoutNullStreams
+    let child: ChildProcessByStdio<null, Readable, Readable>
     try {
       child = spawn("/bin/bash", ["-c", wrapped], {
         cwd:   WORKSPACE_CWD,   // initial; the wrapper jumps to opts.cwd itself
