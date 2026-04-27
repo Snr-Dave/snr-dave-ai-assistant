@@ -22,6 +22,12 @@
 
 > **Deep Charcoal** background · **Electric Cyan** accents · Live data across every panel
 
+### Universal Shell — Settings Panel
+
+![Universal Shell terminal in the Settings panel](public/screenshots/terminal-preview.jpg)
+
+> Glassmorphism slide-over with the **Universal Shell** on its low-latency WebSocket transport — `gh` CLI pre-authenticated, persistent CWD, broadcast bus mirroring AI- and HTTP-issued commands
+
 ---
 
 ## ✨ Features
