@@ -18,7 +18,7 @@
     "@xterm/xterm": "^6.0.0",
     "ai": "^6.0.168",
     "libsodium-wrappers": "^0.8.4",
-    "lucide-react": "^1.11.0",
+    "lucide-react": "^1.12.0",
     "next": "16.2.4",
     "react": "19.2.5",
     "react-dom": "19.2.5",
