@@ -10,7 +10,7 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@ai-sdk/google": "^3.0.64",
+    "@ai-sdk/google": "^3.0.65",
     "@ai-sdk/react": "^3.0.170",
     "@octokit/rest": "^22.0.1",
     "@types/libsodium-wrappers": "^0.7.14",
