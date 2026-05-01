@@ -16,7 +16,7 @@
     "@types/libsodium-wrappers": "^0.7.14",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "ai": "^6.0.168",
+    "ai": "^6.0.172",
     "libsodium-wrappers": "^0.8.4",
     "lucide-react": "^1.11.0",
     "next": "16.2.4",
