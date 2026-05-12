@@ -19,7 +19,7 @@
     "ai": "^6.0.168",
     "libsodium-wrappers": "^0.8.4",
     "lucide-react": "^1.11.0",
-    "next": "16.2.4",
+    "next": "16.2.6",
     "react": "19.2.5",
     "react-dom": "19.2.5",
     "socket.io": "^4.8.3",
